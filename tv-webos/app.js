@@ -365,6 +365,7 @@
 
   function onEvent(name, handler) {
     eventSource.addEventListener(name, function (e) {
+      lastActivity = Date.now();
       var data;
       try {
         data = JSON.parse(e.data);
@@ -392,7 +393,9 @@
     }
     setStatus('st-conn', t('connecting'), 'muted');
     eventSource = new EventSource(address + '/events');
+    lastActivity = Date.now();
     eventSource.onopen = function () {
+      lastActivity = Date.now();
       clearTimeout(scanTimer);
       clearTimeout(dropTimer);
       dropTimer = null;
@@ -413,6 +416,11 @@
       // Bilgisayarın adresi değişmiş olabilir.
       scheduleScan();
     };
+    // Bilgisayar 15 sn'de bir "ping" gönderir; gelmezse bağlantı yarı kopmuştur (bkz. watchConnection).
+    eventSource.addEventListener('ping', function () {
+      lastActivity = Date.now();
+      pingSeen = true;
+    });
     onEvent('subtitle', function (data) {
       diag.subtitles++;
       renderDiag();
@@ -425,6 +433,29 @@
     onEvent('speech', function (data) { if (data.url) playSpeech(server + data.url); });
     onEvent('speech-stop', stopSpeech);
   }
+
+  // --- Bağlantı bekçisi ---
+  // Bazı TV'lerde bağlantı yarı kopar: EventSource "bağlı" görünür ama hiçbir şey gelmez, ya da kapanıp (CLOSED) bir daha
+  // denemez. Altyazılar ancak kullanıcı uygulamaya dokununca geri geliyordu. Bekçi bu iki durumda bağlantıyı yeniden kurar.
+  // Sessizlik sınırı yalnız ping gönderen bilgisayarlarda uygulanır (eski sürümler ping göndermez).
+
+  var SILENCE_LIMIT_MS = 45000;
+  var lastActivity = 0;
+  var pingSeen = false;
+
+  function watchConnection() {
+    if (!server || !eventSource || demoRunning()) return;
+    var closed = eventSource.readyState === 2;
+    var silent = pingSeen && Date.now() - lastActivity > SILENCE_LIMIT_MS;
+    if (closed || silent) {
+      diag.drops++;
+      renderDiag();
+      pingSeen = false;
+      connect(server);
+    }
+  }
+
+  setInterval(watchConnection, 10000);
 
   // --- Türkçe dublaj ---
   // Bilgisayar her cümleyi seslendirip adresini gönderir; TV oyunun sesiyle birlikte çalar. Bilgisayar sıradakini
@@ -509,8 +540,8 @@
           if (!ok) return pump();
           found = true;
           scanning = false;
-          // Aynı bilgisayarsa EventSource zaten kendisi yeniden bağlanır.
-          if (address !== server) {
+          // Aynı bilgisayarsa EventSource kendisi yeniden bağlanır; kapanıp vazgeçtiyse (CLOSED) yeniden kurulur.
+          if (address !== server || (eventSource && eventSource.readyState === 2)) {
             save('server', address);
             connect(address);
           }

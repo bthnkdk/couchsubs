@@ -33,6 +33,10 @@ public class MainActivity extends Activity {
     private TvView tvView;
     private WebView webView;
     private String launchParams = "";
+    /** Son açılan HDMI girişi; uygulama öne gelince ya da bağlantı kopunca yeniden açılır. */
+    private String tunedInput;
+    private int retuneAttempts;
+    private final android.os.Handler handler = new android.os.Handler(android.os.Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -45,9 +49,9 @@ public class MainActivity extends Activity {
         if (getSystemService(TV_INPUT_SERVICE) != null) {
             tvView = new TvView(this);
             tvView.setCallback(new TvView.TvInputCallback() {
-                @Override public void onConnectionFailed(String inputId) { status("inputError"); }
-                @Override public void onDisconnected(String inputId) { status("inputError"); }
-                @Override public void onVideoAvailable(String inputId) { status("playing"); }
+                @Override public void onConnectionFailed(String inputId) { status("inputError"); retuneLater(); }
+                @Override public void onDisconnected(String inputId) { status("inputError"); retuneLater(); }
+                @Override public void onVideoAvailable(String inputId) { retuneAttempts = 0; status("playing"); }
                 @Override public void onVideoUnavailable(String inputId, int reason) { status("inputError"); }
             });
             root.addView(tvView);
@@ -118,8 +122,29 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Bazı TV'ler (ör. TCL) uygulama arka plana gidince HDMI'yi bırakır; öne gelince görüntü yeniden açılır. */
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (tvView != null && tunedInput != null) tune(tunedInput);
+    }
+
+    /** Bağlantı koptuysa birkaç kez, gittikçe seyrek yeniden dener. */
+    private void retuneLater() {
+        if (tvView == null || tunedInput == null || retuneAttempts >= 5) return;
+        retuneAttempts++;
+        String id = tunedInput;
+        handler.postDelayed(() -> { if (id.equals(tunedInput)) tune(id); }, 1500L * retuneAttempts);
+    }
+
+    private void tune(String id) {
+        tunedInput = id;
+        tvView.tune(id, TvContract.buildChannelUriForPassthroughInput(id));
+    }
+
     @Override
     protected void onDestroy() {
+        handler.removeCallbacksAndMessages(null);
         if (tvView != null) tvView.reset();
         webView.destroy();
         super.onDestroy();
@@ -137,16 +162,33 @@ public class MainActivity extends Activity {
         return "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
-    /** TV'nin HDMI girişleri, kimliğe göre sıralı. Girişin numarası sıradaki yeridir. */
+    /**
+     * TV'nin HDMI girişleri, port numarasına göre sıralı. Girişin numarası sıradaki yeridir.
+     * HDMI-CEC ile bağlı cihazlar (PS5 gibi) bazı TV'lerde girişin "alt girişi" olarak ayrıca listelenir; onlar sayılmaz,
+     * yoksa numaralar kayar ve iki bağlı giriş görünür. Kimlikler sayısal sıralanır ("HW10", "HW2"den sonra gelir).
+     */
     private List<TvInputInfo> hdmiInputs() {
         List<TvInputInfo> inputs = new ArrayList<>();
         TvInputManager manager = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
         if (manager == null) return inputs;
         for (TvInputInfo input : manager.getTvInputList()) {
-            if (input.getType() == TvInputInfo.TYPE_HDMI && input.isPassthroughInput()) inputs.add(input);
+            if (input.getType() == TvInputInfo.TYPE_HDMI && input.isPassthroughInput() && input.getParentId() == null) {
+                inputs.add(input);
+            }
         }
-        Collections.sort(inputs, Comparator.comparing(TvInputInfo::getId));
+        Collections.sort(inputs, Comparator.comparingLong((TvInputInfo input) -> lastNumber(input.getId()))
+                .thenComparing(TvInputInfo::getId));
         return inputs;
+    }
+
+    /** Kimliğin sonundaki sayı ("…/HW15" → 15); yoksa en sona konur. */
+    static long lastNumber(String id) {
+        int end = id.length();
+        while (end > 0 && !Character.isDigit(id.charAt(end - 1))) end--;
+        int start = end;
+        while (start > 0 && Character.isDigit(id.charAt(start - 1))) start--;
+        if (start == end) return Long.MAX_VALUE;
+        try { return Long.parseLong(id.substring(start, end)); } catch (NumberFormatException e) { return Long.MAX_VALUE; }
     }
 
     private class Bridge {
@@ -161,8 +203,8 @@ public class MainActivity extends Activity {
                     status("sourceError");
                     return;
                 }
-                String id = inputs.get(port - 1).getId();
-                tvView.tune(id, TvContract.buildChannelUriForPassthroughInput(id));
+                retuneAttempts = 0;
+                tune(inputs.get(port - 1).getId());
             });
         }
 
