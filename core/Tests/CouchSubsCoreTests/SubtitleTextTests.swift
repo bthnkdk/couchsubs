@@ -53,6 +53,22 @@ final class SubtitleSegmenterTests: XCTestCase {
         XCTAssertEqual(pieces("Old Man: Who goes there?"), ["=Old Man: ", "+Who goes there?"])
     }
 
+    /// Windows'taki MarianTranslatorTests.SpeakerNamesAreNotTranslated ile aynı örnekler: çevirmene giden yalnız cümledir.
+    func testSpeakerNamesAreNotSentToTheTranslator() {
+        let cases = [
+            ("ATREUS: Father!", ["Father!"]),
+            ("OLD MAN: Who goes there?", ["Who goes there?"]),
+            ("Mimir Head: Brother, wait.", ["Brother, wait."]),
+            ("Note: Press X.", ["Note: Press X."]),
+        ]
+        for (text, sent) in cases {
+            XCTAssertEqual(SubtitleSegmenter.split(text).filter(\.translate).map(\.text), sent, text)
+        }
+        let names = SpeakerNames()
+        names.learn(from: SubtitleSegmenter.split("OLD MAN: Hello."))
+        XCTAssertEqual(SubtitleSegmenter.normalizeCase("RUN, OLD MAN!", names: names.all), "Run, Old Man!")
+    }
+
     func testGameHeadingsAreTranslated() {
         XCTAssertEqual(pieces("Objective: Find the gate."), ["+Objective: Find the gate."])
     }
