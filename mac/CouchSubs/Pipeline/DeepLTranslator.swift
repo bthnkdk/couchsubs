@@ -16,25 +16,36 @@ struct OnlineKeyCheck: Equatable {
 }
 
 /// İsteğe bağlı çevrimiçi çeviri: kullanıcının kendi DeepL anahtarıyla (Windows'taki `DeepLTranslator` ile aynı).
-/// Altyazı cümle cümle, konuşmacı adları çevrilmeden gönderilir; önceki altyazı bağlam olarak eklenir. DeepL'e
-/// ulaşılamazsa ya da kota biterse o satır Apple'ın cihaz üstü çevirisiyle çevrilir; oyun altyazısız kalmaz.
+/// Altyazı cümle cümle, konuşmacı adları çevrilmeden gönderilir. Son gösterilen 3 satır bağlam olarak eklenir:
+/// DeepL'in `context` alanı (tek metin) çeviriyi etkiler ama çevrilmez ve ücretlendirilmez ("Characters included in
+/// the context parameter will not be counted toward billing", developers.deepl.com/docs/api-reference/translate,
+/// Kasım 2026). Önbellekteki çeviri bağlamsız eski haliyle döner; anahtar yalnız satırın kendisidir.
+/// DeepL'e ulaşılamazsa ya da kota biterse o satır Apple'ın cihaz üstü çevirisiyle çevrilir; oyun altyazısız kalmaz.
 final class DeepLTranslator: TextTranslator {
+    /// Kalıcı önbellek dosyasındaki motor adı.
+    static let engineID = "deepl"
+    /// Bağlama giden önceki satır sayısı.
+    static let contextLines = 3
     /// Hata sonrası bu süre DeepL denenmez; her satırda bağlantı zaman aşımını beklemeyelim.
     private static let retryAfter: TimeInterval = 60
 
     private let key: String
     private let fallback: TextTranslator
     private let session: URLSession
-    private var cache: [String: String] = [:]
+    private let cache: TranslationCache
     private var speech: [String: [SpokenLine]] = [:]
     private let names = SpeakerNames()
-    private var previous: String?
+    /// Son gösterilen satırlar, eskiden yeniye.
+    private var recent: [String] = []
     private var pausedUntil = Date.distantPast
 
-    init(key: String, fallback: TextTranslator, session: URLSession = DeepLTranslator.makeSession()) {
+    /// `cache`: kalıcı önbellek; verilmezse yalnız bellekte tutulur.
+    init(key: String, fallback: TextTranslator, session: URLSession = DeepLTranslator.makeSession(),
+         cache: TranslationCache = TranslationCache()) {
         self.key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         self.fallback = fallback
         self.session = session
+        self.cache = cache
     }
 
     static func makeSession() -> URLSession {
@@ -50,50 +61,57 @@ final class DeepLTranslator: TextTranslator {
     }
 
     func translate(_ text: String) async throws -> String {
-        if let cached = cache[text] { return cached }
+        // Bağlam, bu satırdan önce gösterilenlerdir; satırın kendisi bağlama girmez.
+        let context = recent.isEmpty ? nil : recent.joined(separator: "\n")
+        shown(text)
+        if let cached = cache.value(for: text) { return cached }
         guard Date() >= pausedUntil else { return try await fallback.translate(text) }
         let pieces = SubtitleSegmenter.split(text)
         names.learn(from: pieces)
-        let sources = pieces.filter(\.translate).map { SubtitleSegmenter.normalizeCase($0.text, names: names.all) }
+        // Önbellekte duran cümleler yeniden gönderilmez; kota yalnız yeni cümlelere gider.
+        var translations: [String?] = pieces.map { $0.translate ? cache.value(for: $0.text) : nil }
+        let missing = pieces.indices.filter { pieces[$0].translate && translations[$0] == nil }
+        let sources = missing.map { SubtitleSegmenter.normalizeCase(pieces[$0].text, names: names.all) }
         let translated: [String]
         do {
-            translated = sources.isEmpty ? [] : try await request(sources)
+            translated = sources.isEmpty ? [] : try await request(sources, context: context)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             pausedUntil = Date().addingTimeInterval(Self.retryAfter)
             return try await fallback.translate(text)
         }
-        var result = ""
-        var translations: [String?] = []
-        var next = 0
-        for piece in pieces {
-            let sentence: String? = piece.translate ? translated[next] : nil
-            if piece.translate { next += 1 }
-            translations.append(sentence)
-            result += sentence ?? piece.text
+        for (index, sentence) in zip(missing, translated) {
+            translations[index] = sentence
+            cache.store(sentence, for: pieces[index].text)
         }
+        let result = zip(pieces, translations).map { $1 ?? $0.text }.joined()
         if speech.count >= 512 { speech.removeAll() }
         speech[text] = SpeechScript.lines(pieces: pieces, translations: translations)
-        if cache.count >= 4096 { cache.removeAll() }
-        cache[text] = result
-        previous = text
+        cache.store(result, for: text)
         return result
+    }
+
+    private func shown(_ text: String) {
+        // Aynı satır yeniden okunduysa bağlam tekrarla dolmasın.
+        guard recent.last != text else { return }
+        recent.append(text)
+        if recent.count > Self.contextLines { recent.removeFirst() }
     }
 
     func spokenLines(for text: String) -> [SpokenLine] {
         if let lines = speech[text] { return lines }
-        if let translation = cache[text] { return [SpokenLine(english: text, turkish: translation)] }
-        return fallback.spokenLines(for: text)
+        let cached = SpeechScript.fromCache(text, cache: cache)
+        return cached.isEmpty ? fallback.spokenLines(for: text) : cached
     }
 
-    private func request(_ sentences: [String]) async throws -> [String] {
+    private func request(_ sentences: [String], context: String?) async throws -> [String] {
         var body: [String: Any] = [
             "text": sentences, "source_lang": "EN", "target_lang": "TR",
             // Oyun konuşması: "siz" değil "sen" (DeepL Türkçede desteklemiyorsa yok sayar).
             "formality": "prefer_less", "preserve_formatting": true,
         ]
-        if let previous { body["context"] = previous }
+        if let context { body["context"] = context }
         var request = URLRequest(url: Self.baseURL(for: key).appending(path: "translate"))
         request.httpMethod = "POST"
         request.setValue("DeepL-Auth-Key \(key)", forHTTPHeaderField: "Authorization")

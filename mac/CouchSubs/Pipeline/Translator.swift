@@ -26,17 +26,23 @@ enum TranslatorStatus: Equatable {
 /// Apple'ın cihaz üstü çevirisi. Dil paketi yüklü olmalı; değilse `needsDownload` atar.
 /// Altyazı cümle cümle çevrilir: alt alta sarılmış satırlar birleşir, konuşmacı adları ("ATREUS:") çevrilmez,
 /// tümü büyük harfli cümleler önce cümle düzenine getirilir (öğrenilen adlar büyük harfle kalır).
+/// Uygulama kalıcı önbelleği verir: önceki oturumlarda çevrilmiş satır ve cümleler hiç çevrilmeden döner.
 final class Translator: TextTranslator {
+    /// Kalıcı önbellek dosyasındaki motor adı.
+    static let engineID = "apple"
+
     private let source: Locale.Language
     private let target: Locale.Language
     private var session: TranslationSession?
-    private var cache: [String: String] = [:]
+    private let cache: TranslationCache
     private var speech: [String: [SpokenLine]] = [:]
     private let names = SpeakerNames()
 
-    init(source: String = "en", target: String = "tr") {
+    /// `cache`: kalıcı önbellek; verilmezse yalnız bellekte tutulur.
+    init(source: String = "en", target: String = "tr", cache: TranslationCache = TranslationCache()) {
         self.source = Locale.Language(identifier: source)
         self.target = Locale.Language(identifier: target)
+        self.cache = cache
     }
 
     static func status(source: String, target: String) async -> TranslatorStatus {
@@ -48,7 +54,7 @@ final class Translator: TextTranslator {
     }
 
     func translate(_ text: String) async throws -> String {
-        if let cached = cache[text] { return cached }
+        if let cached = cache.value(for: text) { return cached }
         let pieces = SubtitleSegmenter.split(text)
         names.learn(from: pieces)
         var result = ""
@@ -60,22 +66,16 @@ final class Translator: TextTranslator {
         }
         if speech.count >= 512 { speech.removeAll() }
         speech[text] = SpeechScript.lines(pieces: pieces, translations: translations)
-        remember(text, result)
+        cache.store(result, for: text)
         return result
     }
 
     func spokenLines(for text: String) -> [SpokenLine] {
-        speech[text] ?? [SpokenLine(english: text, turkish: cache[text] ?? "")].filter { !$0.turkish.isEmpty }
-    }
-
-    /// Önbellek sınırsız büyümesin; dolunca boşaltmak bir oturum için yeterli.
-    private func remember(_ source: String, _ translation: String) {
-        if cache.count >= 4096 { cache.removeAll() }
-        cache[source] = translation
+        speech[text] ?? SpeechScript.fromCache(text, cache: cache)
     }
 
     private func translateSentence(_ sentence: String) async throws -> String {
-        if let cached = cache[sentence] { return cached }
+        if let cached = cache.value(for: sentence) { return cached }
         if session == nil {
             switch await LanguageAvailability().status(from: source, to: target) {
             case .installed: session = TranslationSession(installedSource: source, target: target)
@@ -84,7 +84,7 @@ final class Translator: TextTranslator {
             }
         }
         let result = try await session!.translate(GameEnglish.plain(SubtitleSegmenter.normalizeCase(sentence, names: names.all))).targetText
-        remember(sentence, result)
+        cache.store(result, for: sentence)
         return result
     }
 }

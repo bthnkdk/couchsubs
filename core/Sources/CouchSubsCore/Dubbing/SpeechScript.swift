@@ -47,4 +47,18 @@ public enum SpeechScript {
         }
         return lines
     }
+
+    /// Önceki oturumdan önbellekte duran satır: cümleleri de önbellekteyse konuşmacılarıyla kurulur, değilse
+    /// satırın tamamı tek cümle sayılır.
+    public static func fromCache(_ text: String, cache: TranslationCache) -> [SpokenLine] {
+        guard let whole = cache.value(for: text) else { return [] }
+        let pieces = SubtitleSegmenter.split(text)
+        var translations: [String?] = []
+        for piece in pieces {
+            guard piece.translate else { translations.append(nil); continue }
+            guard let sentence = cache.value(for: piece.text) else { return [SpokenLine(english: text, turkish: whole)] }
+            translations.append(sentence)
+        }
+        return lines(pieces: pieces, translations: translations)
+    }
 }

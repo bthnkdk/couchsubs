@@ -18,7 +18,9 @@ public sealed class LiveServices : IAppServices
 {
     public ITranslationModel Translation { get; } = new MarianModel();
 
-    public ITextTranslator? MakeOnlineTranslator(string key, ITextTranslator? fallback) => new DeepLTranslator(key, fallback);
+    // DeepL yalnız İngilizce→Türkçe için açılır; önceki oturumların çevirileri kotadan yemeden yeniden kullanılır.
+    public ITextTranslator? MakeOnlineTranslator(string key, ITextTranslator? fallback) =>
+        new DeepLTranslator(key, fallback, cache: TranslationCache.Shared(AppPaths.Translations, DeepLTranslator.EngineId, "en", "tr"));
 
     public Task<OnlineKeyCheck> CheckOnlineKeyAsync(string key) => DeepLTranslator.CheckAsync(key);
     public IDubbingModel? Dubbing { get; } = PocketDubbingModel.EngineBundled ? new PocketDubbingModel() : null;
@@ -298,7 +300,8 @@ public sealed class LiveServices : IAppServices
         public ITextTranslator Create(string source, string target)
         {
             if (translator is not null) return translator;
-            translator = new MarianTranslator(englishTurkish.InstallDirectory);
+            translator = new MarianTranslator(englishTurkish.InstallDirectory,
+                cache: TranslationCache.Shared(AppPaths.Translations, MarianTranslator.EngineId, "en", "tr"));
             _ = translator.WarmUpAsync();
             return translator;
         }

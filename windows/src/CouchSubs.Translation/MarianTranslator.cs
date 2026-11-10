@@ -9,16 +9,17 @@ namespace CouchSubs.Translation;
 
 /// <summary>
 /// Cihaz üstü İngilizce→Türkçe çeviri (OPUS-MT, ONNX Runtime). Model ilk çeviride yüklenir; aynı satır
-/// oyunda defalarca okunduğu için sonuçlar girdi metnine göre önbelleklenir (Mac'teki gibi).
+/// oyunda defalarca okunduğu için sonuçlar girdi metnine göre önbelleklenir (Mac'teki gibi). Uygulama kalıcı
+/// önbelleği verir: önceki oturumlarda çevrilmiş satır ve cümleler modeli hiç çalıştırmadan döner.
 /// </summary>
 public sealed class MarianTranslator : ITextTranslator, IDisposable
 {
-    /// <summary>Önbellek sınırsız büyümesin; dolunca boşaltmak bir oturum için yeterli.</summary>
-    private const int CacheLimit = 4096;
+    /// <summary>Kalıcı önbellek dosyasındaki motor adı; model değişirse bu da değişmeli.</summary>
+    public const string EngineId = "opus-mt";
 
     private readonly Func<ISentenceEngine> _engineFactory;
     private readonly Func<bool> _isInstalled;
-    private readonly ConcurrentDictionary<string, string> _cache = new(StringComparer.Ordinal);
+    private readonly TranslationCache _cache;
     /// <summary>Konuşmacı etiketlerinden öğrenilen adlar (küçük harfle); cümle içinde de büyük harfle kalırlar.</summary>
     private readonly ConcurrentDictionary<string, byte> _names = new(StringComparer.Ordinal);
     /// <summary>Altyazı → seslendirilecek cümleler (dublaj).</summary>
@@ -28,13 +29,16 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
     private ISentenceEngine? _engine;
     private bool _disposed;
 
-    public MarianTranslator(string modelDirectory, int maxOutputTokens = 128, int beams = OnnxMarianEngine.DefaultBeams)
-        : this(() => new OnnxMarianEngine(modelDirectory, maxOutputTokens, beams), () => IsInstalledIn(modelDirectory)) { }
+    /// <param name="cache">Kalıcı önbellek; verilmezse yalnız bellekte tutulur.</param>
+    public MarianTranslator(string modelDirectory, int maxOutputTokens = 128, int beams = OnnxMarianEngine.DefaultBeams,
+        TranslationCache? cache = null)
+        : this(() => new OnnxMarianEngine(modelDirectory, maxOutputTokens, beams), () => IsInstalledIn(modelDirectory), cache) { }
 
-    internal MarianTranslator(Func<ISentenceEngine> engineFactory, Func<bool> isInstalled)
+    internal MarianTranslator(Func<ISentenceEngine> engineFactory, Func<bool> isInstalled, TranslationCache? cache = null)
     {
         _engineFactory = engineFactory;
         _isInstalled = isInstalled;
+        _cache = cache ?? new TranslationCache();
     }
 
     public TranslatorStatus Status => _engine is not null || _isInstalled() ? TranslatorStatus.Ready : TranslatorStatus.NeedsDownload;
@@ -52,7 +56,7 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
     public async Task<string> TranslateAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(text);
-        if (_cache.TryGetValue(text, out var cached)) return cached;
+        if (_cache.TryGet(text, out var cached)) return cached;
 
         var builder = new StringBuilder();
         var pieces = SubtitleSegmenter.Split(text);
@@ -69,7 +73,7 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
                 translations.Add(null);
                 continue;
             }
-            if (!_cache.TryGetValue(piece.Text, out var sentence))
+            if (!_cache.TryGet(piece.Text, out var sentence))
                 sentence = await TranslateUncachedAsync(piece.Text, cancellationToken).ConfigureAwait(false);
             builder.Append(sentence);
             translations.Add(sentence);
@@ -77,19 +81,12 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
         if (_speech.Count >= 512) _speech.Clear();
         _speech[text] = SpeechScript.Lines(pieces, translations);
         var result = builder.ToString();
-        Remember(text, result);
+        _cache.Store(text, result);
         return result;
     }
 
     public IReadOnlyList<SpokenLine> SpokenLines(string text) =>
-        _speech.TryGetValue(text, out var lines) ? lines
-        : _cache.TryGetValue(text, out var translation) ? [new SpokenLine(text, translation)] : [];
-
-    private void Remember(string source, string translation)
-    {
-        if (_cache.Count >= CacheLimit) _cache.Clear();
-        _cache[source] = translation;
-    }
+        _speech.TryGetValue(text, out var lines) ? lines : SpeechScript.FromCache(text, _cache);
 
     private async Task<string> TranslateUncachedAsync(string sentence, CancellationToken cancellationToken)
     {
@@ -98,14 +95,14 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             // Beklerken başka bir çağrı aynı cümleyi çevirmiş olabilir.
-            if (_cache.TryGetValue(sentence, out var cached)) return cached;
+            if (_cache.TryGet(sentence, out var cached)) return cached;
             var engine = _engine ??= CreateEngine();
             // Çıkarım CPU'yu saniyenin onda biri kadar tutar; çağıranın (arayüz) iş parçacığını bloklamasın.
             var input = GameEnglish.Plain(SubtitleSegmenter.NormalizeCase(sentence, _names.Keys.ToHashSet(StringComparer.Ordinal)));
             var translation = await Task.Run(() => engine.Translate(input, cancellationToken), cancellationToken)
                 .ConfigureAwait(false);
             // Sıra bırakılmadan önce önbelleğe yazılır; sırada bekleyen aynı cümle yeniden çevrilmez.
-            Remember(sentence, translation);
+            _cache.Store(sentence, translation);
             return translation;
         }
         finally

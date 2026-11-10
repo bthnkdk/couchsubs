@@ -98,6 +98,54 @@ public class MarianTranslatorTests
         Assert.Equal("The gate will not hold, Atreus.", engine.Calls[^1]);
     }
 
+    /// <summary>Önceki oturumda çevrilen satır model çalışmadan döner; seslendirme cümleleri de konuşmacısıyla kurulur.</summary>
+    [Fact]
+    public async Task PersistentCacheSkipsTheModelInTheNextSession()
+    {
+        var file = Path.Combine(Path.GetTempPath(), "couchsubs-marian-" + Guid.NewGuid().ToString("N"), "cache.jsonl");
+        try
+        {
+            var firstEngine = new FakeEngine();
+            await new MarianTranslator(() => firstEngine, () => true, new TranslationCache(file))
+                .TranslateAsync("KRATOS: We go now. Stay close.");
+
+            var engine = new FakeEngine();
+            var translator = new MarianTranslator(() => engine, () => true, new TranslationCache(file));
+            Assert.Equal("KRATOS: WE GO NOW. STAY CLOSE.", await translator.TranslateAsync("KRATOS: We go now. Stay close."));
+            Assert.Equal("STAY CLOSE. RUN!", await translator.TranslateAsync("Stay close. Run!"));
+            Assert.Equal(["Run!"], engine.Calls);
+            var lines = translator.SpokenLines("KRATOS: We go now. Stay close.");
+            Assert.Equal(["KRATOS", "KRATOS"], lines.Select(line => line.Speaker));
+            Assert.Equal("STAY CLOSE.", lines[1].Turkish);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(file)!, recursive: true);
+        }
+    }
+
+    /// <summary>Konuşmacı adı çevrilmez, cümle içinde de ad olarak kalır (Mac: SubtitleTextTests ve Translator ile aynı).</summary>
+    [Theory]
+    [InlineData("ATREUS: Father!", "ATREUS: FATHER!", "Father!")]
+    [InlineData("OLD MAN: Who goes there?", "OLD MAN: WHO GOES THERE?", "Who goes there?")]
+    [InlineData("Mimir Head: Brother, wait.", "Mimir Head: BROTHER, WAIT.", "Brother, wait.")]
+    [InlineData("Note: Press X.", "NOTE: PRESS X.", "Note: Press X.")]
+    public async Task SpeakerNamesAreNotTranslated(string source, string expected, string sent)
+    {
+        var (translator, engine) = Create();
+        Assert.Equal(expected, await translator.TranslateAsync(source));
+        Assert.Equal([sent], engine.Calls);
+    }
+
+    [Fact]
+    public async Task MultiWordNamesStayCapitalizedInLaterSentences()
+    {
+        var (translator, engine) = Create();
+        await translator.TranslateAsync("OLD MAN: Hello.");
+        await translator.TranslateAsync("RUN, OLD MAN!");
+        Assert.Equal("Run, Old Man!", engine.Calls[^1]);
+    }
+
     [Fact]
     public async Task ThrowsNeedsDownloadWhenModelMissing()
     {

@@ -78,4 +78,6 @@ public static class AppPaths
 {
     public static string Data { get; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CouchSubs");
     public static string Models { get; } = Path.Combine(Data, "models");
+    /// <summary>Kalıcı çeviri önbellekleri (motor ve dil çifti başına bir dosya).</summary>
+    public static string Translations { get; } = Path.Combine(Data, "translations");
 }

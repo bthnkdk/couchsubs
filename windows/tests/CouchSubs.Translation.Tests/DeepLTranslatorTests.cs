@@ -74,6 +74,83 @@ public class DeepLTranslatorTests
         Assert.StartsWith("https://api.deepl.com/", deepL.Requests[0].Request.RequestUri!.AbsoluteUri);
     }
 
+    private static string? ContextOf(string body) =>
+        JsonDocument.Parse(body).RootElement.TryGetProperty("context", out var context) ? context.GetString() : null;
+
+    private static string[] TextsOf(string body) =>
+        [.. JsonDocument.Parse(body).RootElement.GetProperty("text").EnumerateArray().Select(t => t.GetString()!)];
+
+    /// <summary>Bağlam son gösterilen 3 satırdır (eskiden yeniye); satırın kendisi ve tekrar okunan satır girmez.</summary>
+    [Fact]
+    public async Task ContextIsTheLastThreeShownLines()
+    {
+        var deepL = new FakeDeepL(Echo);
+        var translator = new DeepLTranslator("abc:fx", new FakeLocal(), new HttpClient(deepL));
+        foreach (var line in new[] { "One.", "Two.", "Two.", "Three.", "Four.", "Five." })
+            await translator.TranslateAsync(line);
+
+        Assert.Equal(5, deepL.Requests.Count);
+        Assert.Null(ContextOf(deepL.Requests[0].Body));
+        Assert.Equal("One.", ContextOf(deepL.Requests[1].Body));
+        Assert.Equal("One.\nTwo.", ContextOf(deepL.Requests[2].Body));
+        Assert.Equal("Two.\nThree.\nFour.", ContextOf(deepL.Requests[4].Body));
+    }
+
+    /// <summary>Önbellekten dönen satır da gösterilmiştir; sonraki satırın bağlamına girer.</summary>
+    [Fact]
+    public async Task CachedLinesCountAsContext()
+    {
+        var deepL = new FakeDeepL(Echo);
+        var translator = new DeepLTranslator("abc:fx", new FakeLocal(), new HttpClient(deepL));
+        await translator.TranslateAsync("Where is he?");
+        await translator.TranslateAsync("Upstairs.");
+        await translator.TranslateAsync("Where is he?");
+        await translator.TranslateAsync("Go get him.");
+        Assert.Equal(3, deepL.Requests.Count);
+        Assert.Equal("Where is he?\nUpstairs.\nWhere is he?", ContextOf(deepL.Requests[2].Body));
+    }
+
+    /// <summary>Önceki oturumda çevrilen satır ve cümleler DeepL'e hiç gitmez; yalnız yeni cümle gönderilir.</summary>
+    [Fact]
+    public async Task PersistentCacheSavesQuotaAcrossSessions()
+    {
+        var file = Path.Combine(Path.GetTempPath(), "couchsubs-deepl-" + Guid.NewGuid().ToString("N"), "cache.jsonl");
+        try
+        {
+            var first = new FakeDeepL(Echo);
+            await new DeepLTranslator("abc:fx", new FakeLocal(), new HttpClient(first), new TranslationCache(file))
+                .TranslateAsync("KRATOS: We go now. Stay close.");
+
+            var deepL = new FakeDeepL(Echo);
+            var translator = new DeepLTranslator("abc:fx", new FakeLocal(), new HttpClient(deepL), new TranslationCache(file));
+            Assert.Equal("KRATOS: [tr] We go now. [tr] Stay close.", await translator.TranslateAsync("KRATOS: We go now. Stay close."));
+            Assert.Empty(deepL.Requests);
+            Assert.Equal("[tr] Stay close. [tr] Run!", await translator.TranslateAsync("Stay close. Run!"));
+            Assert.Equal(["Run!"], TextsOf(Assert.Single(deepL.Requests).Body));
+            Assert.Equal("KRATOS", translator.SpokenLines("KRATOS: We go now. Stay close.")[1].Speaker);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(file)!, recursive: true);
+        }
+    }
+
+    /// <summary>DeepL düşünce yerel modelin çevirisi DeepL önbelleğine yazılmaz; DeepL dönünce satır DeepL ile çevrilir.</summary>
+    [Fact]
+    public async Task FallbackResultsAreNotCachedAsDeepL()
+    {
+        var fail = true;
+        var deepL = new FakeDeepL((request, body) => fail ? new HttpResponseMessage(HttpStatusCode.BadGateway) : Echo(request, body));
+        var cache = new TranslationCache();
+        var translator = new DeepLTranslator("abc:fx", new FakeLocal(), new HttpClient(deepL), cache);
+        Assert.Equal("yerel: Run!", await translator.TranslateAsync("Run!"));
+        Assert.False(cache.TryGet("Run!", out _));
+
+        fail = false;
+        var fresh = new DeepLTranslator("abc:fx", new FakeLocal(), new HttpClient(deepL), cache);
+        Assert.Equal("[tr] Run!", await fresh.TranslateAsync("Run!"));
+    }
+
     /// <summary>Kota biterse ya da DeepL'e ulaşılamazsa oyun altyazısız kalmaz; bir süre DeepL hiç denenmez.</summary>
     [Fact]
     public async Task FallsBackToLocalModelWhenDeepLFails()

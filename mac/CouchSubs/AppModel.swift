@@ -845,9 +845,21 @@ final class AppModel {
     // MARK: - Çevrimiçi çeviri (DeepL)
 
     private func makeTranslator() -> TextTranslator {
-        let local = Translator(source: settings.sourceLanguage, target: settings.targetLanguage)
+        let (source, target) = (settings.sourceLanguage, settings.targetLanguage)
+        // Önceki oturumların çevirileri motor ve dil çifti başına diskte durur; tekrar eden satır hemen gelir.
+        let local = Translator(source: source, target: target,
+                               cache: Self.translationCache(engine: Translator.engineID, source: source, target: target))
         guard onlineTranslationActive, let key = store.load(String.self, for: StoreKey.deepLKey) else { return local }
-        return DeepLTranslator(key: key, fallback: local)
+        return DeepLTranslator(key: key, fallback: local,
+                               cache: Self.translationCache(engine: DeepLTranslator.engineID, source: source, target: target))
+    }
+
+    /// ~/Library/Application Support/CouchSubs/Translations içindeki kalıcı çeviri önbelleği.
+    private static func translationCache(engine: String, source: String, target: String) -> TranslationCache {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let directory = base.appendingPathComponent(AppIdentity.name, isDirectory: true)
+            .appendingPathComponent("Translations", isDirectory: true)
+        return TranslationCache.shared(in: directory, engine: engine, source: source, target: target)
     }
 
     /// DeepL yalnız İngilizce→Türkçe için açılır.
