@@ -27,10 +27,32 @@ final class TextMatchTests: XCTestCase {
 
     /// İki satırlık altyazı solarken alt satır kaçırıldı: yeni satır değil.
     func testRereadMissingALineIsSameSubtitle() {
-        let sent = TextMatch.normalize("Across the deep waters, Pbo went,\nhoping a boat would carry him home.")
+        let twoRows = "Across the deep waters, Pbo went,\nhoping a boat would carry him home."
+        let sent = TextMatch.normalizeRows(twoRows)
         XCTAssertTrue(TextMatch.isSameSubtitle(TextMatch.normalize(OcrNoise.clean("Across the deep waters2aljd O went,")), sent))
+        XCTAssertTrue(TextMatch.isSameSubtitle(TextMatch.normalize("Across the deep waters, Pbo went,"), sent))
+        XCTAssertTrue(TextMatch.isSameSubtitle(TextMatch.normalize("hoping a boat would carry him home."), sent))
         // Daktilo efektinde uzayan metin ise yenidir.
-        XCTAssertFalse(TextMatch.isSameSubtitle(sent, TextMatch.normalize("Across the deep waters, Pbo went,")))
+        XCTAssertFalse(TextMatch.isSameSubtitle(TextMatch.normalize(twoRows), TextMatch.normalize("Across the deep waters, Pbo went,")))
+    }
+
+    /// İki konuşmacı aynı sözlerle konuşuyor: sözcüklerin çoğu ortak olsa da ikisi de ayrı çevrilmeli.
+    func testLineSharingMostWordsIsANewSubtitle() {
+        let pairs = [
+            ("Where are you going?", "Where are you going, boy?"),
+            ("Where are you going, boy?", "Where are you going?"),
+            ("We need to leave this place before the sun goes down, boy.", "We need to leave this place before the sun goes down."),
+            ("Boy, we need to leave this place before the sun goes down.", "We need to leave this place before the sun goes down."),
+        ]
+        for (reread, sent) in pairs {
+            XCTAssertFalse(TextMatch.isSameSubtitle(TextMatch.normalize(reread), TextMatch.normalizeRows(sent)), "\(reread) / \(sent)")
+        }
+    }
+
+    /// Tek satırlık altyazının başı kesildiyse satır kaçırılmış sayılmaz; tam satırlar eksikse sayılır.
+    func testShortenedSingleRowIsNotAMissingRow() {
+        XCTAssertFalse(TextMatch.isSameSubtitle("we have to cross the river", TextMatch.normalizeRows("We have to cross the river before the sun goes down")))
+        XCTAssertTrue(TextMatch.isSameSubtitle("we have to cross the river", TextMatch.normalizeRows("We have to cross the river\nbefore the sun goes down")))
     }
 
     func testSameSubtitleKeepsDistinctLinesApart() {

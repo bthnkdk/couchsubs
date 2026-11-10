@@ -32,9 +32,29 @@ public class TextMatchTests
     [Fact]
     public void RereadMissingALineIsSameSubtitle()
     {
-        var sent = TextMatch.Normalize("Across the deep waters, Pbo went,\nhoping a boat would carry him home.");
+        const string twoRows = "Across the deep waters, Pbo went,\nhoping a boat would carry him home.";
+        var sent = TextMatch.NormalizeRows(twoRows);
         Assert.True(TextMatch.IsSameSubtitle(TextMatch.Normalize(OcrNoise.Clean("Across the deep waters2aljd O went,")), sent));
-        Assert.False(TextMatch.IsSameSubtitle(sent, TextMatch.Normalize("Across the deep waters, Pbo went,")));
+        Assert.True(TextMatch.IsSameSubtitle(TextMatch.Normalize("Across the deep waters, Pbo went,"), sent));
+        Assert.True(TextMatch.IsSameSubtitle(TextMatch.Normalize("hoping a boat would carry him home."), sent));
+        Assert.False(TextMatch.IsSameSubtitle(TextMatch.Normalize(twoRows), TextMatch.Normalize("Across the deep waters, Pbo went,")));
+    }
+
+    /// İki konuşmacı aynı sözlerle konuşuyor: sözcüklerin çoğu ortak olsa da ikisi de ayrı çevrilmeli.
+    [Theory]
+    [InlineData("Where are you going?", "Where are you going, boy?")]
+    [InlineData("Where are you going, boy?", "Where are you going?")]
+    [InlineData("We need to leave this place before the sun goes down, boy.", "We need to leave this place before the sun goes down.")]
+    [InlineData("Boy, we need to leave this place before the sun goes down.", "We need to leave this place before the sun goes down.")]
+    public void LineSharingMostWordsIsANewSubtitle(string reread, string sent) =>
+        Assert.False(TextMatch.IsSameSubtitle(TextMatch.Normalize(reread), TextMatch.NormalizeRows(sent)));
+
+    /// Tek satırlık altyazının başı kesildiyse satır kaçırılmış sayılmaz; tam satırlar eksikse sayılır.
+    [Fact]
+    public void ShortenedSingleRowIsNotAMissingRow()
+    {
+        Assert.False(TextMatch.IsSameSubtitle("we have to cross the river", TextMatch.NormalizeRows("We have to cross the river before the sun goes down")));
+        Assert.True(TextMatch.IsSameSubtitle("we have to cross the river", TextMatch.NormalizeRows("We have to cross the river\nbefore the sun goes down")));
     }
 
     [Theory]

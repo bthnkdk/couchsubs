@@ -27,7 +27,9 @@ private struct LinesReader: TextReader {
 private final class FakeTranslator: TextTranslator {
     var error: Error?
     var failuresLeft = 0
+    private(set) var requested: [String] = []
     func translate(_ text: String) async throws -> String {
+        requested.append(text)
         if let error { throw error }
         if failuresLeft > 0 { failuresLeft -= 1; throw URLError(.timedOut) }
         return "TR: " + text
@@ -74,6 +76,16 @@ private final class FakeSender: SubtitleSending {
     func clear() { clears += 1 }
 }
 
+/// Testlerde elle ilerletilen saat (milisaniye).
+private final class PipelineClock: @unchecked Sendable {
+    var now = 1_000_000
+    func read() -> Int { now }
+}
+
+private func lines(_ runs: (String, Int)...) -> [String] {
+    runs.flatMap { Array(repeating: $0.0, count: $0.1) }
+}
+
 @MainActor
 final class SubtitlePipelineTests: XCTestCase {
     private let frame: CGImage = {
@@ -81,6 +93,15 @@ final class SubtitlePipelineTests: XCTestCase {
                                 space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
         return context.makeImage()!
     }()
+
+    /// Saniyede 20 okuma: saat verilirse her kareden sonra 50 ms ilerler.
+    private func run(_ pipeline: SubtitlePipeline, _ frames: Int, wait: Bool = true, clock: PipelineClock? = nil) async {
+        for _ in 0..<frames {
+            await pipeline.process(frame, region: CropRegion())
+            if wait { await pipeline.waitForTranslations() }
+            clock?.now += 50
+        }
+    }
 
     func testStableTextIsTranslatedAndSentOnce() async {
         let sender = FakeSender()
@@ -147,29 +168,97 @@ final class SubtitlePipelineTests: XCTestCase {
 
     func testFailedTranslationIsRetriedWhileLineStaysOnScreen() async {
         let sender = FakeSender()
+        let clock = PipelineClock()
         let translator = FakeTranslator()
         translator.failuresLeft = 1
-        let pipeline = SubtitlePipeline(reader: FakeReader(Array(repeating: "Hold the gate", count: 4)), translator: translator, server: sender)
-        for _ in 0..<4 { await pipeline.process(frame, region: CropRegion()); await pipeline.waitForTranslations() }
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Hold the gate", 25))), translator: translator, server: sender,
+                                        clock: clock.read)
+        await run(pipeline, 25, clock: clock)
         XCTAssertEqual(sender.sent, ["TR: Hold the gate"])
     }
 
-    /// Kareler saniyede ~20 kez okunur; tek tük okunamayan kare altyazıyı TV'den silmemeli.
+    /// Kalıcı hatada (dil paketi eksik) satır ekranda durdukça çevirmene saniyede en çok bir kez gidilir.
+    func testFailedTranslationRetriesAreRateLimited() async {
+        let clock = PipelineClock()
+        let translator = FakeTranslator()
+        translator.error = TranslatorError.needsDownload
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Hold the gate", 40))), translator: translator, server: FakeSender(),
+                                        clock: clock.read)
+        await run(pipeline, 40, clock: clock)
+        XCTAssertTrue((2...3).contains(translator.requested.count), "\(translator.requested.count)")
+    }
+
+    /// Okuma saniyede ~20 kez yapılır; kısa okunamayan an altyazıyı TV'den silmemeli.
     func testShortReadingGapDoesNotClearTheTV() async {
         let sender = FakeSender()
-        let pipeline = SubtitlePipeline(reader: FakeReader(["Hold the gate", "Hold the gate", "", "", "Hold the gate"]),
-                                        translator: FakeTranslator(), server: sender)
-        for _ in 0..<5 { await pipeline.process(frame, region: CropRegion()); await pipeline.waitForTranslations() }
+        let clock = PipelineClock()
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Hold the gate", 2), ("", 2), ("Hold the gate", 1))),
+                                        translator: FakeTranslator(), server: sender, clock: clock.read)
+        await run(pipeline, 5, clock: clock)
         XCTAssertEqual(sender.clears, 0)
         XCTAssertEqual(sender.sent, ["TR: Hold the gate"])
     }
 
-    func testSubtitleGoneForSixFramesClearsTheTV() async {
+    /// Parlak arka planda okuma yarım saniye kaçsa da TV'deki altyazı silinmez, aynı satır yeniden gönderilmez.
+    func testFlickerShorterThanClearTimeNeitherClearsNorResends() async {
         let sender = FakeSender()
-        let pipeline = SubtitlePipeline(reader: FakeReader(["Hold the gate", "Hold the gate", "", "", "", "", "", ""]),
-                                        translator: FakeTranslator(), server: sender)
-        for _ in 0..<8 { await pipeline.process(frame, region: CropRegion()); await pipeline.waitForTranslations() }
+        let clock = PipelineClock()
+        let translator = FakeTranslator()
+        let pipeline = SubtitlePipeline(
+            reader: FakeReader(lines(("Hold the gate", 3), ("", 15), ("Hold the gate", 3), ("", 10), ("Hold the gate", 3))),
+            translator: translator, server: sender, clock: clock.read)
+        await run(pipeline, 34, clock: clock)
+        XCTAssertEqual(sender.clears, 0)
+        XCTAssertEqual(sender.sent, ["TR: Hold the gate"])
+        XCTAssertEqual(translator.requested.count, 1)
+    }
+
+    func testSubtitleGoneForClearTimeClearsTheTV() async {
+        let sender = FakeSender()
+        let clock = PipelineClock()
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Hold the gate", 2), ("", 17))),
+                                        translator: FakeTranslator(), server: sender, clock: clock.read)
+        await run(pipeline, 18, clock: clock)
+        XCTAssertEqual(sender.clears, 0)
+        await run(pipeline, 1, clock: clock)
         XCTAssertEqual(sender.clears, 1)
+    }
+
+    /// Kalkıp 1,5 sn içinde geri gelen satır çevirmene gitmeden eski çevirisiyle yeniden gösterilir.
+    func testLineReturningSoonAfterClearIsRestoredWithoutTranslating() async {
+        let sender = FakeSender()
+        let clock = PipelineClock()
+        let translator = FakeTranslator()
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Hold the gate.", 2), ("", 20), ("Hold the gate.", 2))),
+                                        translator: translator, server: sender, clock: clock.read)
+        var shown = 0
+        pipeline.onPair = { _, _ in shown += 1 }
+        await run(pipeline, 24, clock: clock)
+        XCTAssertEqual(sender.clears, 1)
+        XCTAssertEqual(sender.sent, ["TR: Hold the gate.", "TR: Hold the gate."])
+        XCTAssertEqual(sender.durations, [15000, 15000])
+        XCTAssertEqual(translator.requested.count, 1)
+        XCTAssertEqual(shown, 1)
+    }
+
+    /// Daha geç gelen aynı satır gerçek bir tekrardır; yeniden çevrilir.
+    func testLineReturningLaterIsTranslatedAgain() async {
+        let clock = PipelineClock()
+        let translator = FakeTranslator()
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Hold the gate.", 2), ("", 50), ("Hold the gate.", 2))),
+                                        translator: translator, server: FakeSender(), clock: clock.read)
+        await run(pipeline, 54, clock: clock)
+        XCTAssertEqual(translator.requested.count, 2)
+    }
+
+    /// İki konuşmacı aynı sözlerle konuşuyor; ikisi de çevrilir.
+    func testTwoSpeakersWithOverlappingWordsAreBothTranslated() async {
+        let sender = FakeSender()
+        let clock = PipelineClock()
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Where are you going, boy?", 3), ("Where are you going?", 3))),
+                                        translator: FakeTranslator(), server: sender, clock: clock.read)
+        await run(pipeline, 6, clock: clock)
+        XCTAssertEqual(sender.sent, ["TR: Where are you going, boy?", "TR: Where are you going?"])
     }
 
     /// Bölge değişmiyorsa yazı tanıma çalışmaz; işlemci boşa harcanmaz.
@@ -217,14 +306,33 @@ final class SubtitlePipelineTests: XCTestCase {
         XCTAssertEqual(sender.sent, ["TR: Hold the gate.", "TR: Run!"])
     }
 
-    /// Yeni satırın çevirisi zaten gösterildiyse eski satırınki onun üstüne yazılmaz.
-    func testOlderTranslationArrivingAfterNewerIsDropped() async {
+    /// Hızlı konuşmada çeviri sürerken gelen satırlardan yalnız en yenisi sırada bekler: araya girenler çevrilmez,
+    /// gösterilenler sırayla gelir.
+    func testFastLinesOnlyTranslateTheNewestPending() async {
         let sender = FakeSender()
+        let clock = PipelineClock()
         let translator = GatedTranslator()
-        let pipeline = SubtitlePipeline(reader: FakeReader(["Hold the gate.", "Run!"]), translator: translator, server: sender)
-        for _ in 0..<2 { await pipeline.process(frame, region: CropRegion()) }
-        await translator.release("Run!")
+        let pipeline = SubtitlePipeline(reader: FakeReader(["Hold the gate.", "Run!", "Get down!"]), translator: translator, server: sender,
+                                        clock: clock.read)
+        await run(pipeline, 3, wait: false, clock: clock)
         await translator.release("Hold the gate.")
+        await translator.release("Get down!")
+        await pipeline.waitForTranslations()
+        XCTAssertEqual(translator.requested, ["Hold the gate.", "Get down!"])
+        XCTAssertEqual(sender.sent, ["TR: Hold the gate.", "TR: Get down!"])
+    }
+
+    /// Yeni satır gelmiş, eskisinin çevirisi bir saniyeden geç gelmişse gösterilmez; yeni satırınki gösterilir.
+    func testLateTranslationOfReplacedLineIsDropped() async {
+        let sender = FakeSender()
+        let clock = PipelineClock()
+        let translator = GatedTranslator()
+        let pipeline = SubtitlePipeline(reader: FakeReader(["Hold the gate.", "Run!"]), translator: translator, server: sender,
+                                        clock: clock.read)
+        await run(pipeline, 2, wait: false, clock: clock)
+        clock.now += SubtitlePipeline.lateResultMs + 100
+        await translator.release("Hold the gate.")
+        await translator.release("Run!")
         await pipeline.waitForTranslations()
         XCTAssertEqual(sender.sent, ["TR: Run!"])
     }
@@ -232,14 +340,31 @@ final class SubtitlePipelineTests: XCTestCase {
     /// Satır ekrandan kalktıktan sonra çevirisi gelirse yine de okunacak kadar kısa süre gösterilir.
     func testTranslationArrivingAfterLineLeftIsShownBriefly() async {
         let sender = FakeSender()
+        let clock = PipelineClock()
         let translator = GatedTranslator()
-        let pipeline = SubtitlePipeline(reader: FakeReader(["Hold the gate.", "", "", "", "", "", ""]), translator: translator, server: sender)
-        for _ in 0..<7 { await pipeline.process(frame, region: CropRegion()) }
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Hold the gate.", 1), ("", 17))), translator: translator, server: sender,
+                                        clock: clock.read)
+        await run(pipeline, 18, wait: false, clock: clock)
         XCTAssertEqual(sender.clears, 1)
         translator.open()
         await pipeline.waitForTranslations()
         XCTAssertEqual(sender.sent, ["TR: Hold the gate."])
         XCTAssertEqual(sender.durations.first ?? 0, 2000 + "TR: Hold the gate.".count * 60)
+    }
+
+    /// Satır bir saniyeden uzun süre önce kalktıysa geç gelen çevirisi sonraki sahnenin üstüne düşmez.
+    func testTranslationArrivingLongAfterLineLeftIsDropped() async {
+        let sender = FakeSender()
+        let clock = PipelineClock()
+        let translator = GatedTranslator()
+        let pipeline = SubtitlePipeline(reader: FakeReader(lines(("Hold the gate.", 1), ("", 17))), translator: translator, server: sender,
+                                        clock: clock.read)
+        await run(pipeline, 18, wait: false, clock: clock)
+        XCTAssertEqual(sender.clears, 1)
+        clock.now += SubtitlePipeline.lateResultMs + 100
+        translator.open()
+        await pipeline.waitForTranslations()
+        XCTAssertTrue(sender.sent.isEmpty)
     }
 
     /// Çeviri durdurulduysa geç gelen çeviri TV'ye gönderilmez.

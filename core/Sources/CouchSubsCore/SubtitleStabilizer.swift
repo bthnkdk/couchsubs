@@ -7,41 +7,67 @@ public enum StabilizerAction: Equatable {
     case none
     case translate(String)
     case clear
+    /// Az önce kalkan satır geri geldi; çevirisi yeniden gösterilir, yeniden çevrilmez (metin: ilk gönderilen hali).
+    case restore(String)
 }
 
 /// Kare kare gelen OCR çıktısını izler; altyazı kararlı hale gelince çevrilmesini,
 /// ekrandan kalkınca TV'den temizlenmesini ister. Aynı altyazıyı tekrar göndermez.
+/// Kararlar okuma hızına değil saate bağlıdır (`clock`: milisaniye; testlerde sahtesi verilir).
 public struct SubtitleStabilizer {
+    /// Bölge bu kadar boş kalırsa altyazı kalkmış sayılır; parlak arka planda kaçan birkaç okuma silmez.
+    public static let clearAfterMs = 800
+    /// Kalkan satır bu süre içinde geri gelirse aynı satırdır (okuma kaçmıştı); yeniden çevrilmez.
+    public static let restoreWithinMs = 1500
+    /// Çevirisi başarısız olan satır en erken bu kadar sonra yeniden denenir.
+    public static let retryAfterMs = 1000
+    private static let historySize = 5
+
+    /// Uygulamanın saati: açılıştan bu yana geçen milisaniye.
+    public static func uptimeMs() -> Int { Int(ProcessInfo.processInfo.systemUptime * 1000) }
+
     private let similarity: Double
     private let stableFrames: Int
-    private let emptyFramesToClear: Int
+    private let clearAfterMs: Int
+    private let now: () -> Int
 
     private var candidate = ""
     private var candidateCount = 0
+    /// Ekrandaki (gönderilmiş) satır: sadeleştirilmiş satırlar alt alta, ve ilk okunduğu hali.
     private var sent = ""
-    private var emptyCount = 0
+    private var sentRaw = ""
+    private var emptySince: Int?
+    /// Son kalkan satırlar ve kalktıkları an.
+    private var history: [(rows: String, raw: String, leftAt: Int)] = []
+    /// Çevirisi başarısız olan satır ve en erken yeniden deneneceği an.
+    private var forgotten = ""
+    private var retryAt = 0
 
-    public init(similarity: Double = 0.85, stableFrames: Int = 2, emptyFramesToClear: Int = 2) {
+    public init(similarity: Double = 0.85, stableFrames: Int = 2, clearAfterMs: Int = SubtitleStabilizer.clearAfterMs,
+                clock: @escaping () -> Int = SubtitleStabilizer.uptimeMs) {
         self.similarity = similarity
         self.stableFrames = stableFrames
-        self.emptyFramesToClear = emptyFramesToClear
+        self.clearAfterMs = clearAfterMs
+        self.now = clock
     }
 
     public mutating func feed(_ rawText: String) -> StabilizerAction {
+        let time = now()
         let text = TextMatch.normalize(rawText)
         // 3 karakterden kısa okumalar (gürültü, tek simge) boş kare sayılır.
         guard text.count >= 3 else {
             candidate = ""
             candidateCount = 0
-            emptyCount += 1
-            if emptyCount == emptyFramesToClear && !sent.isEmpty {
-                sent = ""
+            let since = emptySince ?? time
+            emptySince = since
+            if !sent.isEmpty && time - since >= clearAfterMs {
+                leaveScreen(at: time)
                 return .clear
             }
             return .none
         }
 
-        emptyCount = 0
+        emptySince = nil
         if TextMatch.isSimilar(text, candidate, threshold: similarity) {
             candidateCount += 1
         } else {
@@ -50,13 +76,39 @@ public struct SubtitleStabilizer {
         }
         // Daktilo efektinde metin büyürken aday değişir; tamamlanıp kararlı olunca gider.
         // Noktalamayla biten satır zaten tamamdır; hızlı konuşmada beklemeden ilk karede gider.
-        let ready = candidateCount == stableFrames || (candidateCount == 1 && Self.endsSentence(rawText))
+        let ready = candidateCount >= stableFrames || Self.endsSentence(rawText)
         // Gönderilenin gürültülü yeniden okuması yeni satır değildir; TV'de aynı cümle iki kez görünmesin.
-        guard ready, !TextMatch.isSimilar(text, sent, threshold: similarity), !TextMatch.isSameSubtitle(text, sent) else {
-            return .none
+        guard ready, !Self.isSame(text, sent) else { return .none }
+
+        // Az önce kalkan satır geri geldiyse okuma birkaç kare kaçmıştır: çevirisi yeniden gösterilir, yeniden çevrilmez.
+        if let index = history.lastIndex(where: { time - $0.leftAt <= Self.restoreWithinMs && Self.isSame(text, $0.rows) }) {
+            let back = history.remove(at: index)
+            leaveScreen(at: time)
+            (sent, sentRaw) = (back.rows, back.raw)
+            return .restore(back.raw)
         }
-        sent = text
-        return .translate(rawText.trimmingCharacters(in: .whitespacesAndNewlines))
+        // Çevirisi az önce başarısız olan satır her karede yeniden istenmez.
+        if !forgotten.isEmpty && time < retryAt && Self.isSame(text, forgotten) { return .none }
+
+        leaveScreen(at: time)
+        forgotten = ""
+        sentRaw = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+        sent = TextMatch.normalizeRows(sentRaw)
+        return .translate(sentRaw)
+    }
+
+    /// Okuma, bu satırların (gürültülü) yeniden okuması mı; sonuna sözcük eklenmiş hali yenidir.
+    private static func isSame(_ text: String, _ rows: String) -> Bool {
+        !rows.isEmpty && TextMatch.isSameSubtitle(text, rows)
+    }
+
+    /// Ekrandaki satırı geçmişe yazar (kalktı ya da yerine başkası geldi).
+    private mutating func leaveScreen(at time: Int) {
+        guard !sent.isEmpty else { return }
+        history.append((sent, sentRaw, time))
+        if history.count > Self.historySize { history.removeFirst() }
+        sent = ""
+        sentRaw = ""
     }
 
     /// Satır nokta, ünlem, soru ya da üç noktayla bitiyor mu (kapanan tırnak ve parantezler yok sayılır).
@@ -73,9 +125,13 @@ public struct SubtitleStabilizer {
         !TextMatch.isSimilar(TextMatch.normalize(source), TextMatch.normalize(translation), threshold: 0.90)
     }
 
-    /// Son gönderilen satırı unutur (ör. çevirisi başarısız oldu); satır ekranda kaldıkça yeniden kararlı sayılıp çevrilir.
+    /// Son gönderilen satırı unutur (ör. çevirisi başarısız oldu); satır ekranda kaldıkça yeniden kararlı sayılıp çevrilir,
+    /// ama en erken `retryAfterMs` sonra: kalıcı hatada (dil paketi eksik) her karede çevirmene gidilmez.
     public mutating func forgetSent() {
+        if !sent.isEmpty { forgotten = sent }
+        retryAt = now() + Self.retryAfterMs
         sent = ""
+        sentRaw = ""
         candidate = ""
         candidateCount = 0
     }
@@ -83,9 +139,12 @@ public struct SubtitleStabilizer {
     public mutating func reset() -> StabilizerAction {
         candidate = ""
         candidateCount = 0
-        emptyCount = 0
+        emptySince = nil
+        history.removeAll()
+        forgotten = ""
         guard !sent.isEmpty else { return .none }
         sent = ""
+        sentRaw = ""
         return .clear
     }
 }
