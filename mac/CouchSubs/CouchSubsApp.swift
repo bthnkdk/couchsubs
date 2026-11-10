@@ -6,7 +6,7 @@ import SwiftUI
 @main
 struct CouchSubsApp: App {
     @State private var model = Self.makeModel()
-    /// Sparkle: açılışta ve günde bir GitHub'daki son sürüme bakar; testlerde başlamaz.
+    /// Sparkle: her açılışta ve uygulama açıkken saatte bir GitHub'daki son sürüme bakar; testlerde başlamaz.
     private let updater = SPUStandardUpdaterController(
         startingUpdater: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
         updaterDelegate: nil, userDriverDelegate: nil)
@@ -20,6 +20,11 @@ struct CouchSubsApp: App {
         WindowGroup {
             RootView()
                 .environment(model)
+                // Sparkle kendi takviminde günde bir bakar; yeni sürüm her açılışta fark edilsin diye açılışta da sessizce bakılır.
+                .task {
+                    guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
+                    updater.updater.checkForUpdatesInBackground()
+                }
                 .appSurface()
                 .frame(minWidth: Theme.size("windowWidth"), idealWidth: Theme.size("windowWidth"), maxWidth: Theme.size("windowWidth") * 1.25,
                        minHeight: Theme.size("windowHeight"), idealHeight: Theme.size("windowHeight"))

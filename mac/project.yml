@@ -68,6 +68,8 @@ targets:
         SUFeedURL: https://github.com/yorulmazsinan/couchsubs/releases/latest/download/appcast.xml
         SUPublicEDKey: GRsdOlnDQSm2yPnUTF/VoD/0202u2J0GPmJ8CCzVdfc=
         SUEnableAutomaticChecks: true
+        # Uygulama uzun süre açık kalınca da yeni sürüm görünsün: saatte bir.
+        SUScheduledCheckInterval: 3600
     entitlements:
       path: CouchSubs/CouchSubs.entitlements
       properties:
