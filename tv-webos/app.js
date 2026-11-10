@@ -27,7 +27,8 @@
   var currentBox = null;
 
   // Hızlı konuşma: yeni satır öncekinden bu süre içinde gelirse önceki okunamamış olabilir. Önceki çeviri yeni satırın
-  // üstünde küçük ve soluk olarak bir süre daha kalır, sonra solarak kalkar. Ekranda en çok iki satır olur.
+  // üstünde küçük ve soluk olarak bir süre daha kalır, sonra solarak kalkar. Üç kişi art arda konuşursa iki önceki satır
+  // da en üstte daha soluk durur; ekranda en çok üç satır olur.
   var STACK_WITHIN_MS = 1500;
   var PREVIOUS_HOLD_MS = 1500;
   var PREVIOUS_FADE_MS = 400;
@@ -35,8 +36,8 @@
   var MIN_VISIBLE_MS = 1200;
   var shownAt = 0;
   var shownParagraphs = false;
-  var previousTimer = null;
-  var previousFadeTimer = null;
+  // Üstteki satırlar: 'subtitle-prev' bir önceki, 'subtitle-prev2' iki önceki. Her birinin kendi zamanlayıcıları var.
+  var previousTimers = { 'subtitle-prev': [null, null], 'subtitle-prev2': [null, null] };
 
   var hideTimer = null;
   var panelTimer = null;
@@ -214,22 +215,40 @@
     hideTimer = setTimeout(function () { hideSubtitle('clear-held'); }, left);
   }
 
-  // Önceki satırın yerinde zaten daha eski bir satır varsa onun yerini alır (en çok iki satır).
+  // Önceki satır üste çıkar. Orada hâlâ görünen bir satır varsa o da bir üst sıraya (iki önceki) kayar; en çok üç satır.
   function showPrevious(text) {
-    clearTimeout(previousTimer);
-    clearTimeout(previousFadeTimer);
-    $('subtitle-prev-text').textContent = text;
-    $('subtitle-prev').className = '';
-    previousTimer = setTimeout(function () {
-      $('subtitle-prev').className = 'fading';
-      previousFadeTimer = setTimeout(hidePrevious, PREVIOUS_FADE_MS);
+    var older = $('subtitle-prev');
+    var olderText = $('subtitle-prev-text').textContent;
+    if (older.className === '' && olderText && !sameLine(olderText, text)) {
+      showSlot('subtitle-prev2', olderText);
+    } else {
+      hideSlot('subtitle-prev2');
+    }
+    showSlot('subtitle-prev', text);
+  }
+
+  function showSlot(id, text) {
+    var timers = previousTimers[id];
+    clearTimeout(timers[0]);
+    clearTimeout(timers[1]);
+    $(id + '-text').textContent = text;
+    $(id).className = '';
+    timers[0] = setTimeout(function () {
+      $(id).className = 'fading';
+      timers[1] = setTimeout(function () { hideSlot(id); }, PREVIOUS_FADE_MS);
     }, PREVIOUS_HOLD_MS);
   }
 
+  function hideSlot(id) {
+    var timers = previousTimers[id];
+    clearTimeout(timers[0]);
+    clearTimeout(timers[1]);
+    $(id).className = 'hidden';
+  }
+
   function hidePrevious() {
-    clearTimeout(previousTimer);
-    clearTimeout(previousFadeTimer);
-    $('subtitle-prev').className = 'hidden';
+    hideSlot('subtitle-prev');
+    hideSlot('subtitle-prev2');
   }
 
   // Büyük-küçük harf ve noktalama dışında aynı mı, ya da biri ötekinin başı/devamı mı ("Kapı" → "Kapı daha fazla…").
@@ -366,16 +385,19 @@
     if (style.fontSize) {
       $('subtitle-text').style.fontSize = style.fontSize + 'px';
       $('subtitle-prev-text').style.fontSize = Math.round(style.fontSize * 0.8) + 'px';
+      $('subtitle-prev2-text').style.fontSize = Math.round(style.fontSize * 0.8) + 'px';
     }
     if (PLACEMENTS[style.placement]) placement = style.placement;
     if (typeof style.background === 'number') {
       var alpha = Math.max(0, Math.min(100, style.background)) / 100;
       $('subtitle-text').style.background = 'rgba(0, 0, 0, ' + alpha + ')';
       $('subtitle-prev-text').style.background = 'rgba(0, 0, 0, ' + (alpha * 0.83).toFixed(2) + ')';
+      $('subtitle-prev2-text').style.background = 'rgba(0, 0, 0, ' + (alpha * 0.83).toFixed(2) + ')';
     }
     if (typeof style.bold === 'boolean') {
       $('subtitle-text').style.fontWeight = style.bold ? '700' : '600';
       $('subtitle-prev-text').style.fontWeight = style.bold ? '700' : '600';
+      $('subtitle-prev2-text').style.fontWeight = style.bold ? '700' : '600';
     }
     layout();
     if (style.bottomPercent >= 0 && String(style.bottomPercent) !== load('appBottom')) {

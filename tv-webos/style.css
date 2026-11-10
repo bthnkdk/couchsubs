@@ -71,16 +71,18 @@ html, body {
 /* Hızlı konuşmada önceki satır kısa süre yeni satırın üstünde, daha küçük ve soluk durur; sonra solarak kalkar.
    Aradaki boşluk iki kutunun üst üste binmiş gibi görünmesini önler. Solma yalnız bu satırdadır; #subtitle'ın
    kendi katmanı ve görünürlüğü değişmez. */
-#subtitle-prev {
+#subtitle-prev, #subtitle-prev2 {
   margin-bottom: 14px;
   opacity: 0.6;
   -webkit-transition: opacity 0.4s linear;
   transition: opacity 0.4s linear;
 }
-#subtitle-prev.fading { opacity: 0; }
-#subtitle-prev.hidden { display: none; }
+/* İki önceki satır en üstte, daha da soluk durur (ekranda en çok üç satır). */
+#subtitle-prev2 { opacity: 0.45; }
+#subtitle-prev.fading, #subtitle-prev2.fading { opacity: 0; }
+#subtitle-prev.hidden, #subtitle-prev2.hidden { display: none; }
 
-#subtitle-prev-text {
+#subtitle-prev-text, #subtitle-prev2-text {
   display: inline-block;
   padding: 6px 20px;
   border-radius: 10px;
