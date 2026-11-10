@@ -34,6 +34,7 @@
   var timer = null;
   var placement = 'cover';
   var lastStyle = {};
+  var TEXT_COLORS = { white: '#FFFFFF', yellow: '#FFE135' };
 
   function apply(style) {
     style = style || {};
@@ -45,6 +46,7 @@
     var bg = fixed.bg !== null ? Number(fixed.bg) : style.background;
     if (typeof bg === 'number' && !isNaN(bg)) line.style.background = 'rgba(0, 0, 0, ' + Math.max(0, Math.min(100, bg)) / 100 + ')';
     if (typeof style.bold === 'boolean') line.style.fontWeight = style.bold ? '700' : '600';
+    if (TEXT_COLORS[style.textColor]) line.style.color = TEXT_COLORS[style.textColor];
     if (style.placement) placement = style.placement;
   }
 

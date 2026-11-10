@@ -15,6 +15,12 @@ public enum SubtitlePlacement: String, Codable, CaseIterable, Sendable {
     case fixed
 }
 
+/// TV'de altyazı yazısının rengi.
+public enum SubtitleTextColor: String, Codable, CaseIterable, Sendable {
+    case white
+    case yellow
+}
+
 /// TV'de altyazının görünümü.
 public struct SubtitleStyle: Codable, Equatable, Sendable {
     /// 36 (küçük), 46 (orta), 58 (büyük), 72 (çok büyük)
@@ -25,16 +31,19 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
     /// Yazının arkasındaki siyah zeminin koyuluğu, yüzde (0: zemin yok).
     public var background: Int
     public var bold: Bool
+    public var textColor: SubtitleTextColor
 
-    public init(fontSize: Int = 46, bottomPercent: Int = 7, placement: SubtitlePlacement = .cover, background: Int = 72, bold: Bool = false) {
+    public init(fontSize: Int = 46, bottomPercent: Int = 7, placement: SubtitlePlacement = .cover, background: Int = 72, bold: Bool = false,
+                textColor: SubtitleTextColor = .white) {
         self.fontSize = fontSize
         self.bottomPercent = bottomPercent
         self.placement = placement
         self.background = background
         self.bold = bold
+        self.textColor = textColor
     }
 
-    private enum CodingKeys: String, CodingKey { case fontSize, bottomPercent, placement, background, bold }
+    private enum CodingKeys: String, CodingKey { case fontSize, bottomPercent, placement, background, bold, textColor }
 
     /// Eski sürümün kaydettiği ayarlarda yeni alanlar yoktur; eksikler varsayılanla dolar.
     public init(from decoder: Decoder) throws {
@@ -45,12 +54,13 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
         placement = (try? values.decodeIfPresent(SubtitlePlacement.self, forKey: .placement)) ?? defaults.placement
         background = try values.decodeIfPresent(Int.self, forKey: .background) ?? defaults.background
         bold = try values.decodeIfPresent(Bool.self, forKey: .bold) ?? defaults.bold
+        textColor = (try? values.decodeIfPresent(SubtitleTextColor.self, forKey: .textColor)) ?? defaults.textColor
     }
 
     /// TV'ye giden `style` olayının gövdesi.
     var json: [String: Any] {
         ["fontSize": fontSize, "bottomPercent": bottomPercent, "placement": placement.rawValue,
-         "background": max(0, min(100, background)), "bold": bold]
+         "background": max(0, min(100, background)), "bold": bold, "textColor": textColor.rawValue]
     }
 }
 

@@ -34,6 +34,7 @@ public partial class SettingsWindow : Window
         ShowPlacement(settings.Style.Placement);
         BackgroundOpacity.Value = settings.Style.Background;
         Bold.IsChecked = settings.Style.Bold;
+        TextColor.SelectedItem = TextColor.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Style.TextColor.ToString());
         // Yalnız çeviri modeli olan diller listelenir; tek dil varsa seçim gösterilmez.
         foreach (var (code, name) in Languages.Where(l => controller.SupportsLanguage(l.Code)))
             GameLanguage.Items.Add(new ComboBoxItem { Content = Localizer.Current[name], Tag = code, IsSelected = code == settings.SourceLanguage });
@@ -159,6 +160,12 @@ public partial class SettingsWindow : Window
 
     private void OnBold(object sender, RoutedEventArgs e) =>
         Update(s => s with { Style = s.Style with { Bold = Bold.IsChecked == true } });
+
+    private void OnTextColor(object sender, SelectionChangedEventArgs e)
+    {
+        if (TextColor.SelectedItem is not ComboBoxItem { Tag: string tag }) return;
+        Update(s => s with { Style = s.Style with { TextColor = Enum.Parse<SubtitleTextColor>(tag) } });
+    }
 
     private void OnLanguage(object sender, SelectionChangedEventArgs e)
     {
