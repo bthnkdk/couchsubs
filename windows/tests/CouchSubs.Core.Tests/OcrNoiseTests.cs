@@ -29,6 +29,40 @@ public class OcrNoiseTests
     [InlineData("L1 + R1 Spartan Rage")]
     public void UsualTokensAreKept(string line) => Assert.Equal(line, OcrNoise.Clean(line));
 
+    /// <summary>Mafia'da görülen "?!" ve kutu kenarı artıkları; Mac'teki OcrNoiseTests ile aynı örnekler.</summary>
+    [Theory]
+    [InlineData("?! Where do you think you're going?", "Where do you think you're going?")]
+    [InlineData("Where do you think you're going ?!", "Where do you think you're going?!")]
+    [InlineData("Get in the car, Enzo. ?!", "Get in the car, Enzo.")]
+    [InlineData("Wait, ?! Don Salieri wants you.", "Wait, Don Salieri wants you.")]
+    [InlineData(". Get in the car.", "Get in the car.")]
+    [InlineData("| Get in the car, Enzo.", "Get in the car, Enzo.")]
+    [InlineData("Get in the car, Enzo. |", "Get in the car, Enzo.")]
+    [InlineData("Leave it. l", "Leave it.")]
+    public void StrayPunctuationAndBoxEdgesAreRemoved(string line, string expected) => Assert.Equal(expected, OcrNoise.Clean(line));
+
+    [Theory]
+    [InlineData("l don't know, Don Salieri.", "I don't know, Don Salieri.")]
+    [InlineData("| don't know.", "I don't know.")]
+    [InlineData("l'm telling you, l saw him.", "I'm telling you, I saw him.")]
+    [InlineData("|'ll be right back.", "I'll be right back.")]
+    [InlineData("You and l've been here before.", "You and I've been here before.")]
+    public void MisreadPronounBecomesI(string line, string expected) => Assert.Equal(expected, OcrNoise.Clean(line));
+
+    [Theory]
+    [InlineData("What?! The door opened by itself!")]
+    [InlineData("- Where? - Home.")]
+    [InlineData("Wait... what?")]
+    [InlineData("I... I don't know.")]
+    [InlineData("\"Run!\" he said.")]
+    [InlineData("So, you're Enzo?")]
+    [InlineData("... and then he left.")]
+    [InlineData("Wait ... what?")]
+    [InlineData("I said no!")]
+    [InlineData("Leave it, I said.")]
+    [InlineData("Press L to aim.")]
+    public void RealPunctuationIsKept(string line) => Assert.Equal(line, OcrNoise.Clean(line));
+
     [Fact]
     public void ReadingDropsLinesThatWereOnlyNoise()
     {

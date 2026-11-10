@@ -21,6 +21,40 @@ final class OcrNoiseTests: XCTestCase {
         }
     }
 
+    /// Mafia'da görülen "?!" ve kutu kenarı artıkları; Windows'taki OcrNoiseTests ile aynı örnekler.
+    func testStrayPunctuationAndBoxEdgesAreRemoved() {
+        let cases = [
+            ("?! Where do you think you're going?", "Where do you think you're going?"),
+            ("Where do you think you're going ?!", "Where do you think you're going?!"),
+            ("Get in the car, Enzo. ?!", "Get in the car, Enzo."),
+            ("Wait, ?! Don Salieri wants you.", "Wait, Don Salieri wants you."),
+            (". Get in the car.", "Get in the car."),
+            ("| Get in the car, Enzo.", "Get in the car, Enzo."),
+            ("Get in the car, Enzo. |", "Get in the car, Enzo."),
+            ("Leave it. l", "Leave it."),
+        ]
+        for (raw, clean) in cases { XCTAssertEqual(OcrNoise.clean(raw), clean, raw) }
+    }
+
+    func testMisreadPronounBecomesI() {
+        let cases = [
+            ("l don't know, Don Salieri.", "I don't know, Don Salieri."),
+            ("| don't know.", "I don't know."),
+            ("l'm telling you, l saw him.", "I'm telling you, I saw him."),
+            ("|'ll be right back.", "I'll be right back."),
+            ("You and l've been here before.", "You and I've been here before."),
+        ]
+        for (raw, clean) in cases { XCTAssertEqual(OcrNoise.clean(raw), clean, raw) }
+    }
+
+    func testRealPunctuationIsKept() {
+        for line in ["What?! The door opened by itself!", "- Where? - Home.", "Wait... what?", "I... I don't know.",
+                     "\"Run!\" he said.", "So, you're Enzo?", "... and then he left.", "Wait ... what?", "I said no!",
+                     "Leave it, I said.", "Press L to aim."] {
+            XCTAssertEqual(OcrNoise.clean(line), line, line)
+        }
+    }
+
     func testReadingDropsLinesThatWereOnlyNoise() {
         let reading = Reading(lines: [TextLine("We go now."), TextLine("ou$3e 2aljd")]).withoutOcrNoise()
         XCTAssertEqual(reading.text, "We go now.")

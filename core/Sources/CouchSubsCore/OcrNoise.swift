@@ -14,8 +14,24 @@ public enum OcrNoise {
 
     public static func clean(_ line: String) -> String {
         var kept: [String] = []
-        for token in line.split(whereSeparator: \.isWhitespace).map(String.init) {
+        let tokens = line.split(whereSeparator: \.isWhitespace).map(String.init)
+        for (index, token) in tokens.enumerated() {
             let (lead, core, trail) = split(token)
+            // Tek başına "l" ya da "|" çoğu zaman yanlış okunmuş "I"dır ("l don't know", "|'ll go"); ardından küçük
+            // harfle süren sözcük gelmiyorsa altyazı kutusunun kenarıdır ("| Get in the car."), atılır.
+            if let pronoun = misreadI(core) {
+                let next = index + 1 < tokens.count ? tokens[index + 1].first(where: \.isLetter) : nil
+                if pronoun != "I" || next?.isLowercase == true { kept.append(lead + pronoun + trail) }
+                continue
+            }
+            // Yalnız "?!", ".", "," gibi işaretlerden oluşan parça: satır başında ya da cümle bittikten sonra yazı
+            // tanımanın uydurmasıdır ("?! Where", "car. ?!"); sözcükten ayrı düşmüşse sözcüğe yapışır ("going ?!").
+            if core.isEmpty, isStrayPunctuation(token) {
+                if let last = kept.last, let end = last.last, !".?!…,;:".contains(end) {
+                    kept[kept.count - 1] = last + token
+                }
+                continue
+            }
             if let fixed = cleanCore(core) {
                 kept.append(lead + fixed + trail)
             } else if !trail.isEmpty, let last = kept.popLast() {
@@ -30,6 +46,21 @@ public enum OcrNoise {
             kept.removeFirst()
         }
         return kept.joined(separator: " ")
+    }
+
+    /// "l", "|", "l'm", "|'ll" → "I", "I'm", "I'll" (nil: böyle bir okuma değil).
+    private static func misreadI(_ core: String) -> String? {
+        guard let first = core.first, first == "l" || first == "|" else { return nil }
+        let rest = core.dropFirst()
+        if rest.isEmpty { return "I" }
+        guard let apostrophe = rest.first, apostrophe == "'" || apostrophe == "’",
+              ["m", "ll", "ve", "d"].contains(rest.dropFirst()) else { return nil }
+        return "I" + rest
+    }
+
+    /// Yalnız ? ! . , ; : işaretlerinden oluşan parça; üç nokta ("...") gerçek noktalamadır.
+    private static func isStrayPunctuation(_ token: String) -> Bool {
+        !token.isEmpty && token.allSatisfy { "?!.,;:".contains($0) } && !(token.count >= 2 && token.allSatisfy { $0 == "." })
     }
 
     /// Sözcüğün kendisi; nil ise tamamen çöptür.

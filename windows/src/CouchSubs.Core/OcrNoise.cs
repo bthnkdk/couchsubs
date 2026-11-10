@@ -19,9 +19,26 @@ public static partial class OcrNoise
     public static string Clean(string line)
     {
         var kept = new List<string>();
-        foreach (var token in line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        var tokens = line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        for (var index = 0; index < tokens.Length; index++)
         {
+            var token = tokens[index];
             var (lead, core, trail) = Split(token);
+            // Tek başına "l" ya da "|" çoğu zaman yanlış okunmuş "I"dır ("l don't know", "|'ll go"); ardından küçük
+            // harfle süren sözcük gelmiyorsa altyazı kutusunun kenarıdır ("| Get in the car."), atılır.
+            if (MisreadI(core) is { } pronoun)
+            {
+                var next = index + 1 < tokens.Length ? tokens[index + 1].FirstOrDefault(char.IsLetter) : '\0';
+                if (pronoun != "I" || char.IsLower(next)) kept.Add(lead + pronoun + trail);
+                continue;
+            }
+            // Yalnız "?!", ".", "," gibi işaretlerden oluşan parça: satır başında ya da cümle bittikten sonra yazı
+            // tanımanın uydurmasıdır ("?! Where", "car. ?!"); sözcükten ayrı düşmüşse sözcüğe yapışır ("going ?!").
+            if (core.Length == 0 && IsStrayPunctuation(token))
+            {
+                if (kept.Count > 0 && !".?!…,;:".Contains(kept[^1][^1])) kept[^1] += token;
+                continue;
+            }
             if (CleanCore(core) is { } fixedCore)
                 kept.Add(lead + fixedCore + trail);
             else if (trail.Length > 0 && kept.Count > 0)
@@ -64,6 +81,19 @@ public static partial class OcrNoise
         // Tek iç büyük harf ("McDonald", "iPhone") olağan; daha fazlası OCR karışıklığıdır.
         return letters.Skip(1).Count(char.IsUpper) == 1 && letters.Count(char.IsLower) >= 2;
     }
+
+    /// <summary>"l", "|", "l'm", "|'ll" → "I", "I'm", "I'll" (null: böyle bir okuma değil).</summary>
+    private static string? MisreadI(string core)
+    {
+        if (core.Length == 0 || core[0] is not ('l' or '|')) return null;
+        if (core.Length == 1) return "I";
+        if (core[1] is not ('\'' or '’') || core[2..] is not ("m" or "ll" or "ve" or "d")) return null;
+        return "I" + core[1..];
+    }
+
+    /// <summary>Yalnız ? ! . , ; : işaretlerinden oluşan parça; üç nokta ("...") gerçek noktalamadır.</summary>
+    private static bool IsStrayPunctuation(string token) =>
+        token.Length > 0 && token.All(c => "?!.,;:".Contains(c)) && !(token.Length >= 2 && token.All(c => c == '.'));
 
     /// <summary>Sözcüğün kendisi; null ise tamamen çöptür.</summary>
     private static string? CleanCore(string core)
