@@ -187,7 +187,7 @@ struct TranslationCard: View {
         case .valid: String(localized: "It works.")
         case .invalid: String(format: String(localized: "%@ did not accept this key. Copy it again from your account page."), name)
         case .quotaExceeded: String(format: String(localized: "Your %@ account has no credit left or has reached its limit."), name)
-        case .modelRejected: String(format: String(localized: "%@ did not accept the model name. Check it under Advanced."), name)
+        case .modelRejected: String(format: String(localized: "%@ did not accept the request. Choose the other model or try again later."), name)
         case .unreachable: String(format: String(localized: "%@ could not be reached. Check your internet connection."), name)
         }
     }
@@ -252,24 +252,29 @@ private struct DeepLKeySection: View {
     }
 }
 
-/// Yapay zekâ anahtarı, model adı (gelişmiş) ve örnek satırla deneme.
+/// Yapay zekâ modeli (yalnız listedekiler), anahtar ve örnek satırla deneme.
 private struct AIKeySection: View {
     @Environment(AppModel.self) private var model
     let provider: AIProvider
     @State private var key = ""
-    @State private var modelName = ""
     @State private var checking = false
     @State private var result: Result<String, AIFailure>?
 
     private var engine: TranslationEngine { TranslationEngine(provider) }
 
     var body: some View {
+        // Model adı yazılamaz; yalnız ortak listedeki modeller seçilir.
+        Picker("Model", selection: Binding(get: { provider.model(model.settings.model(for: provider)).id },
+                                           set: { model.settings.setModel($0, for: provider) })) {
+            ForEach(provider.models, id: \.id) { option in
+                Text(LocalizedStringKey(option.label)).tag(option.id)
+            }
+        }
         if model.hasKey(engine) {
             HStack(spacing: Theme.space("m")) {
                 DoneLabel(text: String(localized: "Key saved"))
                 Spacer()
                 Button(checking ? LocalizedStringKey("Testing…") : LocalizedStringKey("Test")) {
-                    commitModel()
                     run { await model.testAIKey(for: provider) }
                 }
                 .buttonStyle(.secondary)
@@ -284,7 +289,6 @@ private struct AIKeySection: View {
             HStack(spacing: Theme.space("m")) {
                 SecureField("API key", text: $key).textFieldStyle(.roundedBorder)
                 Button("Save and test") {
-                    commitModel()
                     let typed = key
                     run {
                         let result = await model.setAIKey(typed, for: provider)
@@ -311,26 +315,6 @@ private struct AIKeySection: View {
             case .failure(let failure):
                 ErrorText(error: TranslationCard.describe(OnlineKeyState(failure), engine: engine))
             }
-        }
-        DisclosureGroup("Advanced") {
-            VStack(alignment: .leading, spacing: Theme.space("s")) {
-                TextField("Model", text: $modelName)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(commitModel)
-                HintText(text: "Leave the default unless you want another model of the same service. Faster, cheaper models suit subtitles best.")
-            }
-            .padding(.top, Theme.space("s"))
-        }
-        .font(.csCallout)
-        .onAppear { modelName = provider.model(model.settings.model(for: provider)) }
-        .onDisappear(perform: commitModel)
-    }
-
-    /// Model adı her tuşta değil, Return'de, denemede ve kart kapanınca kaydedilir (her kayıt çeviri hattını yeniden kurar).
-    private func commitModel() {
-        if modelName.trimmingCharacters(in: .whitespaces).isEmpty { modelName = provider.defaultModel }
-        if provider.model(model.settings.model(for: provider)) != modelName.trimmingCharacters(in: .whitespacesAndNewlines) {
-            model.settings.setModel(modelName, for: provider)
         }
     }
 

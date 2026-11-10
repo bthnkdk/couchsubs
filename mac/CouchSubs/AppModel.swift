@@ -74,10 +74,10 @@ struct UserSettings: Codable, Equatable {
     var onlineTranslation = false
     /// Seçili çevrimiçi motor (hiçbir zaman `.free` değildir).
     var onlineEngine = TranslationEngine.deepL
-    /// Yapay zekâ modelleri; boşsa hizmetin varsayılan modeli.
-    var geminiModel = ""
-    var openAIModel = ""
-    var claudeModel = ""
+    /// Seçili yapay zekâ modelleri (listedeki kimlikler; bkz. `AIProvider.models`).
+    var geminiModel = AIProvider.gemini.defaultModel.id
+    var openAIModel = AIProvider.openAI.defaultModel.id
+    var claudeModel = AIProvider.claude.defaultModel.id
 
     init() {}
 
@@ -93,12 +93,19 @@ struct UserSettings: Codable, Equatable {
         onlineTranslation = try values.decodeIfPresent(Bool.self, forKey: .onlineTranslation) ?? defaults.onlineTranslation
         let engine = (try? values.decodeIfPresent(TranslationEngine.self, forKey: .onlineEngine)) ?? defaults.onlineEngine
         onlineEngine = engine == .free ? defaults.onlineEngine : engine
-        geminiModel = try values.decodeIfPresent(String.self, forKey: .geminiModel) ?? ""
-        openAIModel = try values.decodeIfPresent(String.self, forKey: .openAIModel) ?? ""
-        claudeModel = try values.decodeIfPresent(String.self, forKey: .claudeModel) ?? ""
+        geminiModel = try values.decodeIfPresent(String.self, forKey: .geminiModel) ?? defaults.geminiModel
+        openAIModel = try values.decodeIfPresent(String.self, forKey: .openAIModel) ?? defaults.openAIModel
+        claudeModel = try values.decodeIfPresent(String.self, forKey: .claudeModel) ?? defaults.claudeModel
     }
 
-    /// Yapay zekâ hizmetinin kayıtlı model adı (boşsa varsayılan kullanılır).
+    /// Listede olmayan kayıtlı modeller (eski ayar ya da listeden çıkarılan model) varsayılana döner.
+    func withCuratedModels() -> UserSettings {
+        var settings = self
+        for provider in AIProvider.allCases { settings.setModel(provider.model(model(for: provider)).id, for: provider) }
+        return settings
+    }
+
+    /// Yapay zekâ hizmetinin seçili model kimliği.
     func model(for provider: AIProvider) -> String {
         switch provider {
         case .gemini: geminiModel
@@ -107,14 +114,11 @@ struct UserSettings: Codable, Equatable {
         }
     }
 
-    mutating func setModel(_ model: String, for provider: AIProvider) {
-        // Varsayılanla aynıysa boş kalır: ileride varsayılan değişirse kullanıcı da yeni modele geçer.
-        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = trimmed == provider.defaultModel ? "" : trimmed
+    mutating func setModel(_ id: String, for provider: AIProvider) {
         switch provider {
-        case .gemini: geminiModel = value
-        case .openAI: openAIModel = value
-        case .claude: claudeModel = value
+        case .gemini: geminiModel = id
+        case .openAI: openAIModel = id
+        case .claude: claudeModel = id
         }
     }
 
@@ -520,7 +524,11 @@ final class AppModel {
         self.accountId = accountId
         self.console = console
         self.tv = tv
-        settings = defaults.data(forKey: StoreKey.settings).flatMap { try? JSONDecoder().decode(UserSettings.self, from: $0) } ?? UserSettings()
+        let loaded = defaults.data(forKey: StoreKey.settings).flatMap { try? JSONDecoder().decode(UserSettings.self, from: $0) } ?? UserSettings()
+        let curated = loaded.withCuratedModels()
+        settings = curated
+        // Listede olmayan model varsayılana döndüyse ayar hemen kaydedilir.
+        if curated != loaded, let data = try? JSONEncoder().encode(curated) { defaults.set(data, forKey: StoreKey.settings) }
         step = ready ? .done : .welcome
         savedKeys = Set(TranslationEngine.allCases.filter { engine in
             engine.storeKey.flatMap { store.load(String.self, for: $0) }?.isEmpty == false
@@ -947,7 +955,7 @@ final class AppModel {
         guard onlineTranslationActive, let storeKey = engine.storeKey, let key = store.load(String.self, for: storeKey) else { return local }
         let online: TextTranslator & OnlineTranslating
         if let provider = engine.aiProvider {
-            let model = provider.model(settings.model(for: provider))
+            let model = provider.model(settings.model(for: provider)).id
             online = AITranslator(provider: provider, key: key, model: model, fallback: local,
                                   cache: Self.translationCache(engine: provider.engineID(model: model), source: source, target: target))
         } else {

@@ -61,7 +61,7 @@ public static class TranslationEngines
             OnlineKeyState.Valid => text["It works."],
             OnlineKeyState.Invalid => text.Format("%@ did not accept this key. Copy it again from your account page.", name),
             OnlineKeyState.QuotaExceeded => text.Format("Your %@ account has no credit left or has reached its limit.", name),
-            OnlineKeyState.ModelRejected => text.Format("%@ did not accept the model name. Check it under Advanced.", name),
+            OnlineKeyState.ModelRejected => text.Format("%@ did not accept the request. Choose the other model or try again later.", name),
             _ => text.Format("%@ could not be reached. Check your internet connection.", name),
         };
     }
@@ -104,10 +104,10 @@ public sealed record UserSettings
     public bool OnlineTranslation { get; init; }
     /// <summary>Seçili çevrimiçi motor (hiçbir zaman Free değildir).</summary>
     public TranslationEngine OnlineEngine { get; init; } = TranslationEngine.DeepL;
-    /// <summary>Yapay zekâ modelleri; boşsa hizmetin varsayılan modeli.</summary>
-    public string GeminiModel { get; init; } = "";
-    public string OpenAiModel { get; init; } = "";
-    public string ClaudeModel { get; init; } = "";
+    /// <summary>Seçili yapay zekâ modelleri (listedeki kimlikler; bkz. <see cref="AiProviders.Models"/>).</summary>
+    public string GeminiModel { get; init; } = AiProvider.Gemini.DefaultModel().Id;
+    public string OpenAiModel { get; init; } = AiProvider.OpenAi.DefaultModel().Id;
+    public string ClaudeModel { get; init; } = AiProvider.Claude.DefaultModel().Id;
 
     /// <summary>Ayarlarda seçili motor: çevrimiçi çeviri kapalıysa ücretsiz olan.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -117,7 +117,7 @@ public sealed record UserSettings
         ? this with { OnlineTranslation = false }
         : this with { OnlineTranslation = true, OnlineEngine = engine };
 
-    /// <summary>Yapay zekâ hizmetinin kayıtlı model adı (boşsa varsayılan kullanılır).</summary>
+    /// <summary>Yapay zekâ hizmetinin seçili model kimliği.</summary>
     public string ModelFor(AiProvider provider) => provider switch
     {
         AiProvider.Gemini => GeminiModel,
@@ -125,17 +125,16 @@ public sealed record UserSettings
         _ => ClaudeModel,
     };
 
-    /// <summary>Varsayılanla aynı model boş kalır: ileride varsayılan değişirse kullanıcı da yeni modele geçer.</summary>
-    public UserSettings WithModel(AiProvider provider, string model)
+    public UserSettings WithModel(AiProvider provider, string id) => provider switch
     {
-        var value = model.Trim() == provider.DefaultModel() ? "" : model.Trim();
-        return provider switch
-        {
-            AiProvider.Gemini => this with { GeminiModel = value },
-            AiProvider.OpenAi => this with { OpenAiModel = value },
-            _ => this with { ClaudeModel = value },
-        };
-    }
+        AiProvider.Gemini => this with { GeminiModel = id },
+        AiProvider.OpenAi => this with { OpenAiModel = id },
+        _ => this with { ClaudeModel = id },
+    };
+
+    /// <summary>Listede olmayan kayıtlı modeller (eski ayar ya da listeden çıkarılan model) varsayılana döner.</summary>
+    public UserSettings WithCuratedModels() => Enum.GetValues<AiProvider>()
+        .Aggregate(this, (settings, provider) => settings.WithModel(provider, provider.Model(settings.ModelFor(provider)).Id));
 
     /// <summary>Ek bölgenin sayısı; <see cref="ExtraRegion"/> 1..ExtraRegionCount arasında çalışır.</summary>
     public const int ExtraRegionCount = 3;

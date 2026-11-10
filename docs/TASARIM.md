@@ -104,9 +104,10 @@ kart; gerekiyorsa dil paketi uyarı kartı; "Son altyazı" kartında `title` boy
 
 **Ayarlar**: `title` başlık; sırasıyla "TV'de" (yazı boyutu, ekrandaki konum, test altyazısı),
 "Dil", "Çeviri", "Altyazı bölgesi" kartları ve Hakkında / Yeniden kur düğmeleri; altta "Bitti" (birincil).
-"Çeviri" kartında motor seçimi (Ücretsiz, DeepL, Gemini, OpenAI, Claude); ücretli motorda kısa açıklama, gizli
-anahtar alanı ve "Kaydet ve dene" (ikincil), anahtar sayfası bağlantısı, kayıtlıysa "Anahtar kayıtlı" (DoneLabel) ile
-"Dene" ve "Anahtarı sil" (ikincil), kapalı "Gelişmiş" bölümünde model adı. Sonuç HintText, hata ErrorText olur.
+"Çeviri" kartında motor seçimi (Ücretsiz, DeepL, Gemini, OpenAI, Claude); ücretli motorda kısa açıklama, model
+seçimi, gizli anahtar alanı ve "Kaydet ve dene" (ikincil), anahtar sayfası bağlantısı, kayıtlıysa "Anahtar kayıtlı" (DoneLabel) ile
+"Dene" ve "Anahtarı sil" (ikincil). Model yazılamaz; "Model" seçiminde yalnız ortak listedeki modeller
+(`core/Sources/CouchSubsCore/Resources/ai-models.json`) sade adlarıyla görünür. Sonuç HintText, hata ErrorText olur.
 Çevrimiçi motor çeviri sırasında hata verirse ana ekranda uyarı kartı çıkar.
 
 **Hakkında**: 88 pt logo, ad, sürüm, lisans, teşekkür, bağlantılar, Sony ile ilişkisizlik notu.

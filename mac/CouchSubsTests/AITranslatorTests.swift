@@ -51,18 +51,32 @@ final class AITranslatorTests: XCTestCase {
     func testOldSettingsOpenWithDeepL() throws {
         let old = try JSONDecoder().decode(UserSettings.self, from: Data(#"{"onlineTranslation":true}"#.utf8))
         XCTAssertEqual(old.translationEngine, .deepL)
-        XCTAssertEqual(AIProvider.gemini.model(old.model(for: .gemini)), "gemini-3.5-flash-lite")
+        XCTAssertEqual(old.model(for: .gemini), "gemini-3.5-flash-lite")
 
         var settings = UserSettings()
         XCTAssertEqual(settings.translationEngine, .free)
         settings.translationEngine = .claude
         settings.setModel("claude-sonnet-5-5", for: .claude)
-        settings.setModel(AIProvider.openAI.defaultModel, for: .openAI)
         let again = try JSONDecoder().decode(UserSettings.self, from: JSONEncoder().encode(settings))
         XCTAssertEqual(again.translationEngine, .claude)
         XCTAssertEqual(again.claudeModel, "claude-sonnet-5-5")
-        XCTAssertEqual(again.openAIModel, "")
+        XCTAssertEqual(again.openAIModel, "gpt-6-luna")
         settings.translationEngine = .free
         XCTAssertEqual(settings.onlineEngine, .claude)
+    }
+
+    /// Listede olmayan kayıtlı model (eski sürümün boş alanı, elle yazılmış ad) varsayılana döner ve hemen kaydedilir.
+    @MainActor
+    func testUnknownSavedModelFallsBackToDefaultAndIsSaved() throws {
+        let defaults = UserDefaults(suiteName: "couchsubs-models-\(UUID().uuidString)")!
+        defaults.set(Data(#"{"onlineTranslation":true,"onlineEngine":"openai","openAIModel":"gpt-4o","geminiModel":"","claudeModel":"claude-sonnet-5-5"}"#.utf8),
+                     forKey: StoreKey.settings)
+        let model = AppModel(services: FakeServices(), store: EphemeralStore(), defaults: defaults)
+        XCTAssertEqual(model.settings.openAIModel, "gpt-6-luna")
+        XCTAssertEqual(model.settings.geminiModel, "gemini-3.5-flash-lite")
+        XCTAssertEqual(model.settings.claudeModel, "claude-sonnet-5-5")
+        let saved = try JSONDecoder().decode(UserSettings.self, from: XCTUnwrap(defaults.data(forKey: StoreKey.settings)))
+        XCTAssertEqual(saved.openAIModel, "gpt-6-luna")
+        XCTAssertEqual(saved.geminiModel, "gemini-3.5-flash-lite")
     }
 }

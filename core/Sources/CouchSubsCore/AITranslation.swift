@@ -8,19 +8,11 @@ public enum AIProvider: String, Codable, CaseIterable, Sendable {
     case openAI = "openai"
     case claude
 
-    /// Hızlı ve ucuz varsayılan model; kullanıcı ayarlarda değiştirebilir (Kasım 2026'da belgelerden denetlendi).
-    public var defaultModel: String {
-        switch self {
-        // "Our fastest, most cost-effective 3.5 model", düşünmesi varsayılan olarak en az düzeyde
-        // (aistudio.google.com/docs/models, aistudio.google.com/docs/thinking).
-        case .gemini: "gemini-3.5-flash-lite"
-        // "Our most efficient model for focused, high-volume tasks", reasoning_effort "none" destekler
-        // (developers.openai.com/api/docs/models).
-        case .openAI: "gpt-6-luna"
-        // "Fastest", gecikmeye duyarlı işler için (platform.claude.com/docs/en/about-claude/models/overview).
-        case .claude: "claude-haiku-5-5"
-        }
-    }
+    /// Seçilebilen modeller; ilki varsayılandır (hızlı ve ucuz). Liste Windows ile ortak `ai-models.json` dosyasından gelir.
+    public var models: [AIModel] { AIModel.catalog[rawValue] ?? [] }
+
+    /// Hızlı ve ucuz varsayılan model.
+    public var defaultModel: AIModel { models[0] }
 
     /// Marka adı; çevrilmez.
     public var displayName: String {
@@ -43,10 +35,46 @@ public enum AIProvider: String, Codable, CaseIterable, Sendable {
     /// Kalıcı önbellek dosyasındaki motor adı: model değişince eski modelin çevirileri karışmaz.
     public func engineID(model: String) -> String { "\(rawValue):\(model)" }
 
-    /// Boş ya da yalnız boşluk olan model adı varsayılana döner.
-    public func model(_ custom: String?) -> String {
-        let trimmed = custom?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? defaultModel : trimmed
+    /// Kayıtlı model listede yoksa (eski ayar ya da listeden çıkarılan model) varsayılan model.
+    public func model(_ id: String?) -> AIModel {
+        models.first { $0.id == id } ?? defaultModel
+    }
+}
+
+/// Listedeki bir model ve onunla gönderilen ayarlar. Kullanıcı model adı yazamaz; yalnız bu listeden seçer.
+public struct AIModel: Codable, Equatable, Sendable {
+    public var id: String
+    /// Ayarlarda görünen ad (Localizable.xcstrings anahtarı).
+    public var label: String
+    /// OpenAI'da `reasoning_effort`, Claude'da `output_config.effort`; nil ise gönderilmez.
+    public var effort: String?
+    /// Gemini'de `thinkingConfig.thinkingLevel`, Claude'da `thinking.type`; nil ise gönderilmez.
+    public var thinking: String?
+
+    public init(id: String, label: String, effort: String? = nil, thinking: String? = nil) {
+        self.id = id
+        self.label = label
+        self.effort = effort
+        self.thinking = thinking
+    }
+
+    /// `ai-models.json`: hizmet adı → modeller.
+    static let catalog: [String: [AIModel]] = {
+        guard let url = Bundle.module.url(forResource: "ai-models", withExtension: "json"),
+              let data = try? Data(contentsOf: url) else { return [:] }
+        return parse(data)
+    }()
+
+    /// "_comment" gibi dizi olmayan alanlar atlanır.
+    static func parse(_ data: Data) -> [String: [AIModel]] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        var result: [String: [AIModel]] = [:]
+        for (key, value) in root {
+            guard let list = value as? [Any], let json = try? JSONSerialization.data(withJSONObject: list),
+                  let models = try? JSONDecoder().decode([AIModel].self, from: json), !models.isEmpty else { continue }
+            result[key] = models
+        }
+        return result
     }
 }
 
@@ -56,7 +84,7 @@ public enum AIFailure: Error, Equatable, Sendable {
     case invalidKey
     /// Bakiye bitti, aylık sınır ya da dakikalık istek sınırı aşıldı (429, 402, Claude'da "credit balance").
     case quotaExceeded
-    /// Model adı tanınmadı ya da istek kabul edilmedi (400, 404).
+    /// Hizmet isteği kabul etmedi (400, 404); ör. listedeki model hesapta açık değil.
     case modelRejected
     /// Ağ hatası, zaman aşımı, hizmet arızası ya da anlaşılmayan yanıt.
     case unreachable
@@ -107,7 +135,7 @@ public enum AIRequest {
     }
 
     /// Hizmete giden HTTP isteği.
-    public static func make(provider: AIProvider, key: String, model: String, sentences: [String],
+    public static func make(provider: AIProvider, key: String, model: AIModel, sentences: [String],
                             context: [AIContextLine], game: String? = nil) -> URLRequest {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         let user = userMessage(sentences: sentences, context: context, game: game)
@@ -117,14 +145,16 @@ public enum AIRequest {
         case .gemini:
             // https://ai.google.dev/api/generate-content (aistudio.google.com/api-reference/generate-content):
             // POST /v1beta/models/{model}:generateContent, anahtar "x-goog-api-key" başlığında.
-            // Gemini 3.6 Flash ve sonrası temperature'ı yok sayıyor; Flash-Lite zaten en az düşünmeyle çalışıyor.
-            let escaped = model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? model
+            // Gemini 3.6 Flash ve sonrası temperature'ı yok sayıyor; düşünme düzeyi listedeki modelle gelir.
+            let escaped = model.id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? model.id
             request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(escaped):generateContent")!)
             request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+            var config: [String: Any] = ["maxOutputTokens": maxOutputTokens]
+            if let thinking = model.thinking { config["thinkingConfig"] = ["thinkingLevel": thinking] }
             body = [
                 "systemInstruction": ["parts": [["text": systemPrompt]]],
                 "contents": [["role": "user", "parts": [["text": user]]]],
-                "generationConfig": ["maxOutputTokens": maxOutputTokens],
+                "generationConfig": config,
             ]
         case .openAI:
             // https://platform.openai.com/docs/api-reference/chat/create (developers.openai.com/api/reference):
@@ -132,36 +162,31 @@ public enum AIRequest {
             request = URLRequest(url: URL(string: "https://api.openai.com/v1/chat/completions")!)
             request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             body = [
-                "model": model,
+                "model": model.id,
                 "messages": [["role": "developer", "content": systemPrompt], ["role": "user", "content": user]],
                 "max_completion_tokens": maxOutputTokens,
-                "reasoning_effort": openAIEffort(model),
             ]
+            if let effort = model.effort { body["reasoning_effort"] = effort }
         case .claude:
             // https://docs.anthropic.com/en/api/messages (platform.claude.com/docs/en/api/messages): POST /v1/messages,
-            // "x-api-key" ve "anthropic-version". Yeni modellerde temperature gönderilmez; hız için effort "low",
-            // Haiku 5.5'te düşünme kapalı (platform.claude.com/docs/en/build-with-claude/effort).
+            // "x-api-key" ve "anthropic-version". Yeni modellerde temperature gönderilmez; effort ve düşünme listedeki
+            // modelle gelir (platform.claude.com/docs/en/build-with-claude/effort).
             request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
             request.setValue(key, forHTTPHeaderField: "x-api-key")
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
             body = [
-                "model": model,
+                "model": model.id,
                 "max_tokens": maxOutputTokens,
                 "system": systemPrompt,
                 "messages": [["role": "user", "content": user]],
-                "output_config": ["effort": "low"],
             ]
-            if model.hasPrefix("claude-haiku-5") { body["thinking"] = ["type": "disabled"] }
+            if let effort = model.effort { body["output_config"] = ["effort": effort] }
+            if let thinking = model.thinking { body["thinking"] = ["type": thinking] }
         }
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return request
-    }
-
-    /// "none" yalnız hızlı modellerde var; diğerlerinde en düşük ortak düzey "low".
-    static func openAIEffort(_ model: String) -> String {
-        model.contains("luna") || model.contains("terra") ? "none" : "low"
     }
 
     /// Yanıttaki düz metin (düşünme bölümleri atlanır).
@@ -229,7 +254,7 @@ public final class AITranslationCore: @unchecked Sendable {
     public static let retryAfter: TimeInterval = 60
 
     public let provider: AIProvider
-    public let model: String
+    public let model: AIModel
     private let key: String
     private let session: URLSession
     private let cache: TranslationCache
@@ -245,6 +270,7 @@ public final class AITranslationCore: @unchecked Sendable {
     public var lastFailure: AIFailure? { lock.withLock { failure } }
     public var onFailureChanged: ((AIFailure?) -> Void)?
 
+    /// `model`: kayıtlı model kimliği; listede yoksa varsayılan model.
     public init(provider: AIProvider, key: String, model: String? = nil, session: URLSession = AITranslationCore.makeSession(),
                 cache: TranslationCache = TranslationCache()) {
         self.provider = provider

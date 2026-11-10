@@ -49,7 +49,6 @@ public partial class SettingsWindow : Window
         Engine.SelectedItem = Engine.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Engine.ToString());
         ShowEngine();
         loading = false;
-        Closed += (_, _) => CommitModel();
     }
 
     /// <summary>Seçili motor (ayarlarda ücretsiz ise Free).</summary>
@@ -83,8 +82,8 @@ public partial class SettingsWindow : Window
         var provider = engine.Provider();
         KeyLink.NavigateUri = provider?.KeyPage() ?? new Uri("https://www.deepl.com/pro-api");
         KeyLinkText.Text = provider is { } named ? text.Format("Get a %@ API key", named.DisplayName()) : text["Get a free DeepL API key"];
-        Advanced.Visibility = provider is null ? Visibility.Collapsed : Visibility.Visible;
-        if (provider is { } p) ModelBox.Text = p.Model(controller.Settings.ModelFor(p));
+        ModelPanel.Visibility = provider is null ? Visibility.Collapsed : Visibility.Visible;
+        if (provider is { } p) ShowModels(p);
         if (saved && engine == TranslationEngine.DeepL) _ = ShowDeepLUsageAsync();
     }
 
@@ -120,7 +119,6 @@ public partial class SettingsWindow : Window
     private void OnEngine(object sender, SelectionChangedEventArgs e)
     {
         if (loading) return;
-        CommitModel();
         Update(s => s.WithEngine(SelectedEngine));
         ShowEngine();
     }
@@ -131,7 +129,6 @@ public partial class SettingsWindow : Window
         KeySave.IsEnabled = false;
         try
         {
-            CommitModel();
             if (engine.Provider() is { } provider)
             {
                 var result = await controller.SetAiKeyAsync(provider, KeyBox.Password);
@@ -162,7 +159,6 @@ public partial class SettingsWindow : Window
         KeyTest.Content = Localizer.Current["Testing…"];
         try
         {
-            CommitModel();
             ShowAiResult(await controller.TestAiKeyAsync(provider), engine);
         }
         finally
@@ -179,20 +175,22 @@ public partial class SettingsWindow : Window
         ShowEngine();
     }
 
-    /// <summary>Model adı her tuşta değil, Enter'da, odak çıkınca ve denemede kaydedilir (her kayıt çeviri hattını yeniden kurar).</summary>
-    private void CommitModel()
+    /// <summary>Hizmetin listedeki modelleri; seçili olan işaretlenir.</summary>
+    private void ShowModels(AiProvider provider)
     {
-        if (SelectedEngine.Provider() is not { } provider) return;
-        if (string.IsNullOrWhiteSpace(ModelBox.Text)) ModelBox.Text = provider.DefaultModel();
-        if (provider.Model(controller.Settings.ModelFor(provider)) != ModelBox.Text.Trim())
-            Update(s => s.WithModel(provider, ModelBox.Text));
+        var wasLoading = loading;
+        loading = true;
+        ModelChoice.Items.Clear();
+        var selected = provider.Model(controller.Settings.ModelFor(provider)).Id;
+        foreach (var option in provider.Models())
+            ModelChoice.Items.Add(new ComboBoxItem { Content = Localizer.Current[option.Label], Tag = option.Id, IsSelected = option.Id == selected });
+        loading = wasLoading;
     }
 
-    private void OnModelCommit(object sender, RoutedEventArgs e) => CommitModel();
-
-    private void OnModelKey(object sender, System.Windows.Input.KeyEventArgs e)
+    private void OnModel(object sender, SelectionChangedEventArgs e)
     {
-        if (e.Key == System.Windows.Input.Key.Enter) CommitModel();
+        if (loading || SelectedEngine.Provider() is not { } provider || ModelChoice.SelectedItem is not ComboBoxItem { Tag: string id }) return;
+        Update(s => s.WithModel(provider, id));
     }
 
     private void OnLink(object sender, RequestNavigateEventArgs e) =>

@@ -89,7 +89,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         accountId = store.Load<byte[]>(StoreKeys.AccountId);
         console = store.Load<RegisteredConsole>(StoreKeys.Console);
         tv = store.Load<LgTv>(StoreKeys.Tv);
-        settings = settingsStore.Load();
+        var loaded = settingsStore.Load();
+        settings = loaded.WithCuratedModels();
+        // Listede olmayan model varsayılana döndüyse ayar hemen kaydedilir.
+        if (settings != loaded) settingsStore.Save(settings);
         var ready = accountId is not null && console is not null && tv is not null && store.Load<string>(StoreKeys.TvKey) is not null;
         step = ready ? OnboardingStep.Done : OnboardingStep.Welcome;
         server.ClientsChanged += OnClientsChanged;
@@ -883,7 +886,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         if (!OnlineTranslationActive || engine.StoreKey() is not { } storeKey || store.Load<string>(storeKey) is not { Length: > 0 } key)
             return local;
         var online = engine.Provider() is { } provider
-            ? services.MakeAiTranslator(provider, key, provider.Model(settings.ModelFor(provider)), fallback)
+            ? services.MakeAiTranslator(provider, key, provider.Model(settings.ModelFor(provider)).Id, fallback)
             : services.MakeOnlineTranslator(key, fallback);
         if (online is null) return local;
         // Hizmet çeviremeyince ana ekranda uyarı çıkar; düzelince kalkar.
@@ -932,7 +935,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public async Task<AiTestResult> SetAiKeyAsync(AiProvider provider, string key)
     {
         key = key.Trim();
-        var result = await services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)));
+        var result = await services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id);
         if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected)
             SaveKey(provider.Engine(), key);
         return result;
@@ -941,7 +944,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Kayıtlı anahtar ve modelle örnek satırı çevirir (ayarlardaki "Dene").</summary>
     public Task<AiTestResult> TestAiKeyAsync(AiProvider provider) =>
         provider.Engine().StoreKey() is { } storeKey && store.Load<string>(storeKey) is { Length: > 0 } key
-            ? services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)))
+            ? services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)).Id)
             : Task.FromResult(new AiTestResult(OnlineKeyState.Invalid));
 
     public void RemoveKey(TranslationEngine engine)

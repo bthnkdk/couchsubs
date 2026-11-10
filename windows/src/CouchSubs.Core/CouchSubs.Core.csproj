@@ -11,6 +11,7 @@
     <!-- Mac uygulamasıyla ortak tek kaynaklar: tasarım değerleri ve metinler. -->
     <EmbeddedResource Include="..\..\..\design\tokens.json" LogicalName="tokens.json" />
     <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\obs-overlay.html" LogicalName="obs-overlay.html" />
+    <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\ai-models.json" LogicalName="ai-models.json" />
     <EmbeddedResource Include="..\..\..\mac\CouchSubs\Resources\Localizable.xcstrings" LogicalName="Localizable.xcstrings" />
   </ItemGroup>
 

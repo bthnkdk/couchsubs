@@ -111,6 +111,8 @@ public class AiTranslatorTests
         var json = JsonNode.Parse(body)!;
         Assert.Equal(AiRequest.SystemPrompt, json["systemInstruction"]!["parts"]![0]!["text"]!.GetValue<string>());
         Assert.Equal(AiRequest.MaxOutputTokens, json["generationConfig"]!["maxOutputTokens"]!.GetValue<int>());
+        // Flash-Lite zaten en az düşünmeyle çalışır; düşünme ayarı gönderilmez.
+        Assert.Null(json["generationConfig"]!["thinkingConfig"]);
         // Konuşmacı etiketi gönderilmez; yalnız cümle gider.
         Assert.EndsWith("[\"We go now.\"]", User(fake, 0));
         Assert.DoesNotContain("KRATOS", User(fake, 0));
@@ -151,18 +153,65 @@ public class AiTranslatorTests
         Assert.Equal("disabled", json["thinking"]!["type"]!.GetValue<string>());
     }
 
+    /// <summary>Effort ve düşünme ayarı listedeki modelden gelir, adından tahmin edilmez.</summary>
     [Fact]
-    public async Task CustomModelIsUsedAndHasItsOwnEngineId()
+    public async Task PerModelParametersAreSent()
     {
         var fake = new FakeAi();
-        await Make(AiProvider.OpenAi, fake, model: " gpt-6.1-sol ").TranslateAsync("Run!");
-        var json = JsonNode.Parse(fake.Requests[0].Body)!;
-        Assert.Equal("gpt-6.1-sol", json["model"]!.GetValue<string>());
-        Assert.Equal("low", json["reasoning_effort"]!.GetValue<string>());
-        Assert.Equal("gemini:gemini-3.5-flash-lite", AiProvider.Gemini.EngineId("gemini-3.5-flash-lite"));
-        Assert.Equal("openai:gpt-6-luna", AiProvider.OpenAi.EngineId("gpt-6-luna"));
-        Assert.Equal("claude:claude-haiku-5-5", AiProvider.Claude.EngineId(AiProvider.Claude.Model("")));
+        await Make(AiProvider.OpenAi, fake, model: "gpt-6.1-terra").TranslateAsync("Run!");
+        var openAi = JsonNode.Parse(fake.Requests[0].Body)!;
+        Assert.Equal("gpt-6.1-terra", openAi["model"]!.GetValue<string>());
+        Assert.Equal("none", openAi["reasoning_effort"]!.GetValue<string>());
+
+        await Make(AiProvider.Claude, fake, model: "claude-sonnet-5-5").TranslateAsync("Run!");
+        var claude = JsonNode.Parse(fake.Requests[1].Body)!;
+        Assert.Equal("claude-sonnet-5-5", claude["model"]!.GetValue<string>());
+        Assert.Equal("low", claude["output_config"]!["effort"]!.GetValue<string>());
+        Assert.Equal("between_tools", claude["thinking"]!["type"]!.GetValue<string>());
+
+        await Make(AiProvider.Gemini, fake, model: "gemini-3.6-flash").TranslateAsync("Run!");
+        Assert.Contains("/models/gemini-3.6-flash:generateContent", fake.Requests[2].Request.RequestUri!.AbsoluteUri);
+        Assert.Equal("LOW", JsonNode.Parse(fake.Requests[2].Body)!["generationConfig"]!["thinkingConfig"]!["thinkingLevel"]!.GetValue<string>());
     }
+
+    /// <summary>Listede olmayan kayıtlı model (eski ayar, elle yazılmış ad, listeden çıkarılan model) varsayılana döner.</summary>
+    [Fact]
+    public async Task UnknownModelFallsBackToDefault()
+    {
+        var fake = new FakeAi();
+        await Make(AiProvider.OpenAi, fake, model: "gpt-4o").TranslateAsync("Run!");
+        Assert.Equal("gpt-6-luna", JsonNode.Parse(fake.Requests[0].Body)!["model"]!.GetValue<string>());
+        Assert.Equal("gemini-3.5-flash-lite", AiProvider.Gemini.Model("").Id);
+        Assert.Equal("claude-haiku-5-5", AiProvider.Claude.Model(null).Id);
+        Assert.Equal("gemini:gemini-3.5-flash-lite", AiProvider.Gemini.EngineId("gemini-3.5-flash-lite"));
+        Assert.Equal("openai:gpt-6-luna", AiProvider.OpenAi.EngineId(AiProvider.OpenAi.DefaultModel().Id));
+    }
+
+    /// <summary>
+    /// Liste Mac ile ortak dosyadan (core/Sources/CouchSubsCore/Resources/ai-models.json) gömülür; her hizmette önerilen
+    /// hızlı model ilk sıradadır.
+    /// </summary>
+    [Fact]
+    public void CatalogIsTheSharedFile()
+    {
+        var file = Path.Combine(RepoRoot(), "core", "Sources", "CouchSubsCore", "Resources", "ai-models.json");
+        var parsed = AiModel.Parse(File.ReadAllText(file));
+        Assert.Equal(["claude", "gemini", "openai"], parsed.Keys.Order());
+        foreach (var provider in Enum.GetValues<AiProvider>())
+        {
+            Assert.Equal(parsed[provider.Id()], provider.Models());
+            Assert.True(provider.Models().Count >= 2);
+            Assert.Equal("Fast and cheap (recommended)", provider.DefaultModel().Label);
+            Assert.Equal(provider.Models().Count, provider.Models().Select(m => m.Id).Distinct().Count());
+            // Etiketler ortak metin dosyasında çevrilmiş olmalı.
+            Assert.NotEqual(provider.DefaultModel().Label, Localizer.ForLanguage("tr")[provider.DefaultModel().Label]);
+        }
+        Assert.Equal(new AiModel("gemini-3.5-flash-lite", "Fast and cheap (recommended)"), AiProvider.Gemini.DefaultModel());
+        Assert.Equal("disabled", AiProvider.Claude.DefaultModel().Thinking);
+    }
+
+    private static string RepoRoot([System.Runtime.CompilerServices.CallerFilePath] string path = "") =>
+        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, "..", "..", ".."));
 
     /// <summary>Son gösterilen 3 satır ve çevirileri bağlam olarak gider; satırın kendisi ve tekrar okunan satır girmez.</summary>
     [Fact]

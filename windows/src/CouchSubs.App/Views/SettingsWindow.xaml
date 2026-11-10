@@ -103,6 +103,11 @@
                         <TextBlock x:Name="EnglishOnlyHint" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"
                                    Text="{t:T 'Online engines translate English games only. For other game languages the free translation is used.'}" />
                         <StackPanel x:Name="KeyPanel" Margin="0,12,0,0">
+                            <!-- Model adı yazılamaz; yalnız ortak listedeki modeller seçilir. -->
+                            <StackPanel x:Name="ModelPanel" Orientation="Horizontal" Margin="0,0,0,12">
+                                <TextBlock Text="{t:T 'Model'}" VerticalAlignment="Center" Margin="0,0,16,0" />
+                                <ComboBox x:Name="ModelChoice" MinWidth="240" SelectionChanged="OnModel" />
+                            </StackPanel>
                             <StackPanel x:Name="NewKey">
                                 <StackPanel Orientation="Horizontal">
                                     <PasswordBox x:Name="KeyBox" Width="320" VerticalContentAlignment="Center" />
@@ -121,14 +126,6 @@
                             </DockPanel>
                             <TextBlock x:Name="KeyStatus" Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
                             <TextBlock x:Name="KeyError" Style="{StaticResource ErrorText}" Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
-                            <Expander x:Name="Advanced" Header="{t:T 'Advanced'}" Margin="0,12,0,0" Foreground="{DynamicResource textSecondaryBrush}">
-                                <StackPanel Margin="0,8,0,0">
-                                    <TextBlock Text="{t:T 'Model'}" Style="{StaticResource HintText}" Margin="0,0,0,4" />
-                                    <TextBox x:Name="ModelBox" Width="320" HorizontalAlignment="Left" LostFocus="OnModelCommit" KeyDown="OnModelKey" />
-                                    <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
-                                               Text="{t:T 'Leave the default unless you want another model of the same service. Faster, cheaper models suit subtitles best.'}" />
-                                </StackPanel>
-                            </Expander>
                         </StackPanel>
                     </StackPanel>
                 </c:Card>
