@@ -4384,6 +4384,22 @@
           }
         }
       }
+    },
+    "The sign-in window needs Microsoft's WebView2 component, which is missing on this computer. Install it from the page that just opened, then press Sign in again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sign-in window needs Microsoft's WebView2 component, which is missing on this computer. Install it from the page that just opened, then press Sign in again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giriş penceresi için Microsoft'un WebView2 bileşeni gerekiyor ve bu bilgisayarda yok. Az önce açılan sayfadan kurun, sonra yeniden Giriş yap'a basın."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

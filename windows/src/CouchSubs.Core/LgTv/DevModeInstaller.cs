@@ -116,17 +116,41 @@ public sealed class DevModeInstaller(IRemoteShell shell, TimeSpan? pollInterval 
         {
             throw new DevModeException(DevModeError.KeyServerOff);
         }
+        // TV'nin anahtarı eski PEM biçimindedir; uygulamanın içinde çözülür, dış araca ve dosya izinlerine bağlı kalınmaz.
+        var pem = System.Text.Encoding.UTF8.GetString(key);
+        if (LegacyPemKey.IsLegacyEncrypted(pem)) return DecryptWithCaseFallback(pem, passphrase.Trim());
+
         var file = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         try
         {
             await File.WriteAllBytesAsync(file, key);
             var result = await runner.RunAsync(tools.SshKeygen, ["-q", "-p", "-P", passphrase, "-N", "", "-f", file], null);
-            if (result.Status != 0) throw new DevModeException(DevModeError.WrongPassphrase);
+            if (result.Status != 0)
+            {
+                // Yalnız ssh-keygen parolayı reddettiyse "parola yanlış" denir; başka sebep (ör. dosya izni) günlüğe gider.
+                var wrong = result.Output.Contains("passphrase", StringComparison.OrdinalIgnoreCase)
+                    && (result.Output.Contains("incorrect", StringComparison.OrdinalIgnoreCase)
+                        || result.Output.Contains("bad", StringComparison.OrdinalIgnoreCase));
+                throw new DevModeException(wrong ? DevModeError.WrongPassphrase : DevModeError.InstallFailed, result.Output.Trim());
+            }
             return await File.ReadAllTextAsync(file);
         }
         finally
         {
             File.Delete(file);
+        }
+    }
+
+    /// <summary>TV parolayı büyük harfle gösterir; küçük harfle yazılmışsa büyük harfli hâli de denenir.</summary>
+    private static string DecryptWithCaseFallback(string pem, string passphrase)
+    {
+        try
+        {
+            return LegacyPemKey.Decrypt(pem, passphrase);
+        }
+        catch (DevModeException error) when (error.Error == DevModeError.WrongPassphrase && passphrase != passphrase.ToUpperInvariant())
+        {
+            return LegacyPemKey.Decrypt(pem, passphrase.ToUpperInvariant());
         }
     }
 

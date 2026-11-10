@@ -27,6 +27,16 @@ public partial class PsnLoginWindow : Window
         return window.redirect;
     }
 
+    /// <summary>Microsoft'un WebView2 indirme sayfası (Evergreen kurulumu).</summary>
+    public const string BrowserDownloadUrl = "https://go.microsoft.com/fwlink/p/?LinkId=2124703";
+
+    /// <summary>WebView2 çalışma ortamı kurulu mu? Değilse pencere açılırken WebView2RuntimeNotFoundException ile çökerdi.</summary>
+    public static bool IsBrowserAvailable()
+    {
+        try { return !string.IsNullOrEmpty(CoreWebView2Environment.GetAvailableBrowserVersionString()); }
+        catch (Exception) { return false; }
+    }
+
     // Tarayıcı süreci kapanana kadar ortam canlı kalmalı; yoksa BrowserProcessExited gelmez.
     private static CoreWebView2Environment? lastEnvironment;
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
 using CouchSubs.Core;
@@ -25,6 +26,14 @@ public partial class PsnLoginStep : UserControl
 
     private async void OnSignIn(object sender, RoutedEventArgs e)
     {
+        // Giriş penceresi WebView2 ile açılır; kurulum normalde onu da kurar, yine de eksikse çökmek yerine yol gösterilir.
+        if (!PsnLoginWindow.IsBrowserAvailable())
+        {
+            Error.Text = Localizer.Current["The sign-in window needs Microsoft's WebView2 component, which is missing on this computer. Install it from the page that just opened, then press Sign in again."];
+            try { Process.Start(new ProcessStartInfo(PsnLoginWindow.BrowserDownloadUrl) { UseShellExecute = true }); }
+            catch (Exception) { }
+            return;
+        }
         var redirect = PsnLoginWindow.Show(Window.GetWindow(this));
         if (redirect is null) return;
         SignIn.IsEnabled = false;

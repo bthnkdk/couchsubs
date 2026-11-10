@@ -192,7 +192,8 @@ jobs:
             vpk download github --repoUrl https://github.com/yorulmazsinan/couchsubs -o Releases
             if ($LASTEXITCODE -ne 0) { Write-Host "Önceki Velopack sürümü yok; yalnız tam paket üretilecek." }
           }
-          vpk pack --packId CouchSubsApp --packVersion $version --packDir pack --mainExe CouchSubs.exe `
+          # --framework webview2: PlayStation giriş penceresi WebView2 ister; eksik bilgisayarlarda kurulum onu da kurar.
+          vpk pack --packId CouchSubsApp --packVersion $version --packDir pack --mainExe CouchSubs.exe --framework webview2 `
             --packTitle CouchSubs --packAuthors Enmera --icon windows/src/CouchSubs.App/Assets/CouchSubs.ico --outputDir Releases
           if ($LASTEXITCODE -ne 0) { throw "vpk pack başarısız" }
           New-Item -ItemType Directory installer | Out-Null
