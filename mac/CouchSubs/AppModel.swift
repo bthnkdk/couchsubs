@@ -19,6 +19,47 @@ enum StoreKey {
     static let settings = "settings"
     /// Kullanıcının DeepL anahtarı (isteğe bağlı çevrimiçi çeviri).
     static let deepLKey = "deepLKey"
+    /// Kullanıcının yapay zekâ anahtarları (isteğe bağlı çevrimiçi çeviri).
+    static let geminiKey = "geminiKey"
+    static let openAIKey = "openAIKey"
+    static let claudeKey = "claudeKey"
+}
+
+/// Ayarlardaki çeviri motoru seçimi. Ücretsiz olan cihaz üstü çeviridir; diğerleri kullanıcının kendi anahtarıyla
+/// çalışır (Windows'taki `TranslationEngine` ile aynı).
+enum TranslationEngine: String, Codable, CaseIterable {
+    case free, deepL = "deepl", gemini, openAI = "openai", claude
+
+    var aiProvider: AIProvider? {
+        switch self {
+        case .gemini: .gemini
+        case .openAI: .openAI
+        case .claude: .claude
+        case .free, .deepL: nil
+        }
+    }
+
+    init(_ provider: AIProvider) {
+        switch provider {
+        case .gemini: self = .gemini
+        case .openAI: self = .openAI
+        case .claude: self = .claude
+        }
+    }
+
+    /// Hizmetin adı (marka adı; çevrilmez).
+    var displayName: String { aiProvider?.displayName ?? "DeepL" }
+
+    /// Anahtarlık'taki anahtar adı.
+    var storeKey: String? {
+        switch self {
+        case .free: nil
+        case .deepL: StoreKey.deepLKey
+        case .gemini: StoreKey.geminiKey
+        case .openAI: StoreKey.openAIKey
+        case .claude: StoreKey.claudeKey
+        }
+    }
 }
 
 /// Kalıcı ayarlar (Anahtarlık değil, sıradan tercihler).
@@ -28,8 +69,15 @@ struct UserSettings: Codable, Equatable {
     var sourceLanguage = "en"
     var targetLanguage = "tr"
     var dubbing = DubbingSettings()
-    /// Anahtar girildiyse çeviri DeepL'le yapılır; kapalıysa ya da DeepL'e ulaşılamazsa Apple'ın cihaz üstü çevirisi.
+    /// Açıksa çeviri `onlineEngine` ile yapılır (anahtarı kayıtlıysa); kapalıysa ya da hizmete ulaşılamazsa Apple'ın
+    /// cihaz üstü çevirisi. Eski sürümlerde yalnız DeepL vardı; o kayıtlar DeepL ile açılır.
     var onlineTranslation = false
+    /// Seçili çevrimiçi motor (hiçbir zaman `.free` değildir).
+    var onlineEngine = TranslationEngine.deepL
+    /// Yapay zekâ modelleri; boşsa hizmetin varsayılan modeli.
+    var geminiModel = ""
+    var openAIModel = ""
+    var claudeModel = ""
 
     init() {}
 
@@ -43,6 +91,40 @@ struct UserSettings: Codable, Equatable {
         targetLanguage = try values.decodeIfPresent(String.self, forKey: .targetLanguage) ?? defaults.targetLanguage
         dubbing = (try? values.decodeIfPresent(DubbingSettings.self, forKey: .dubbing)) ?? defaults.dubbing
         onlineTranslation = try values.decodeIfPresent(Bool.self, forKey: .onlineTranslation) ?? defaults.onlineTranslation
+        let engine = (try? values.decodeIfPresent(TranslationEngine.self, forKey: .onlineEngine)) ?? defaults.onlineEngine
+        onlineEngine = engine == .free ? defaults.onlineEngine : engine
+        geminiModel = try values.decodeIfPresent(String.self, forKey: .geminiModel) ?? ""
+        openAIModel = try values.decodeIfPresent(String.self, forKey: .openAIModel) ?? ""
+        claudeModel = try values.decodeIfPresent(String.self, forKey: .claudeModel) ?? ""
+    }
+
+    /// Yapay zekâ hizmetinin kayıtlı model adı (boşsa varsayılan kullanılır).
+    func model(for provider: AIProvider) -> String {
+        switch provider {
+        case .gemini: geminiModel
+        case .openAI: openAIModel
+        case .claude: claudeModel
+        }
+    }
+
+    mutating func setModel(_ model: String, for provider: AIProvider) {
+        // Varsayılanla aynıysa boş kalır: ileride varsayılan değişirse kullanıcı da yeni modele geçer.
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = trimmed == provider.defaultModel ? "" : trimmed
+        switch provider {
+        case .gemini: geminiModel = value
+        case .openAI: openAIModel = value
+        case .claude: claudeModel = value
+        }
+    }
+
+    /// Ayarlarda seçili motor: çevrimiçi çeviri kapalıysa ücretsiz olan.
+    var translationEngine: TranslationEngine {
+        get { onlineTranslation ? onlineEngine : .free }
+        set {
+            onlineTranslation = newValue != .free
+            if newValue != .free { onlineEngine = newValue }
+        }
     }
 }
 
@@ -70,6 +152,10 @@ final class EphemeralStore: AppStore {
 extension AppServices {
     /// DeepL anahtarını dener (ayarlardaki "Kaydet ve dene").
     func checkOnlineKey(_ key: String) async -> OnlineKeyCheck { await DeepLTranslator.check(key: key) }
+    /// Yapay zekâ anahtarını örnek bir satırı çevirerek dener.
+    func testAIKey(provider: AIProvider, key: String, model: String?) async -> Result<String, AIFailure> {
+        await AITranslationCore.test(provider: provider, key: key, model: model)
+    }
 }
 
 protocol AppServices: AnyObject {
@@ -364,9 +450,12 @@ final class AppModel {
             if let data = try? JSONEncoder().encode(settings) { defaults.set(data, forKey: StoreKey.settings) }
             server.sendStyle(settings.style)
             if settings.dubbing != oldValue.dubbing { dubbingSettingsChanged(from: oldValue.dubbing) }
-            if settings.onlineTranslation != oldValue.onlineTranslation { Task { await refreshTranslatorStatus() } }
+            let translationChanged = settings.onlineTranslation != oldValue.onlineTranslation
+                || settings.onlineEngine != oldValue.onlineEngine || settings.geminiModel != oldValue.geminiModel
+                || settings.openAIModel != oldValue.openAIModel || settings.claudeModel != oldValue.claudeModel
+            if translationChanged { Task { await refreshTranslatorStatus() } }
             if isRunning, settings.sourceLanguage != oldValue.sourceLanguage || settings.targetLanguage != oldValue.targetLanguage
-                || settings.onlineTranslation != oldValue.onlineTranslation {
+                || translationChanged {
                 Task { await refreshTranslatorStatus() }
                 makePipeline()
             }
@@ -385,6 +474,8 @@ final class AppModel {
     /// Bu oturumda çevrilen altyazılar; kaçırılan satır ana pencereden yeniden okunur.
     var history = SubtitleHistory()
     var translatorStatus: TranslatorStatus = .ready
+    /// Çevrimiçi çeviri (DeepL ya da yapay zekâ) şu an çeviremiyor; o satırlar cihaz üstü çeviriyle çevriliyor.
+    var onlineIssue: OnlineKeyState?
     /// Yazı tanıma art arda hata veriyor; değeri diskteki boş yer (GB). macOS, diskte yer kalmayınca okuma modelini
     /// diske yazamaz ve her okumayı hata ile bitirir; altyazı sessizce hiç gelmez.
     var readingFailedFreeGB: Double?
@@ -431,7 +522,9 @@ final class AppModel {
         self.tv = tv
         settings = defaults.data(forKey: StoreKey.settings).flatMap { try? JSONDecoder().decode(UserSettings.self, from: $0) } ?? UserSettings()
         step = ready ? .done : .welcome
-        deepLKeySaved = store.load(String.self, for: StoreKey.deepLKey)?.isEmpty == false
+        savedKeys = Set(TranslationEngine.allCases.filter { engine in
+            engine.storeKey.flatMap { store.load(String.self, for: $0) }?.isEmpty == false
+        })
         server.onClientsChanged = { [weak self] count in self?.tvClients = count }
     }
 
@@ -829,6 +922,7 @@ final class AppModel {
         }
         pipeline.onReadResult = { [weak self] error in self?.noteRead(error) }
         pipeline.onSpeech = { [weak self] lines in self?.speak(lines) }
+        onlineIssue = nil
         pipeline.warmUp()
         self.pipeline = pipeline
         activeLanguages = (settings.sourceLanguage, settings.targetLanguage)
@@ -842,16 +936,29 @@ final class AppModel {
         translatorStatus = await Translator.status(source: settings.sourceLanguage, target: settings.targetLanguage)
     }
 
-    // MARK: - Çevrimiçi çeviri (DeepL)
+    // MARK: - Çevrimiçi çeviri (DeepL ve yapay zekâ)
 
     private func makeTranslator() -> TextTranslator {
         let (source, target) = (settings.sourceLanguage, settings.targetLanguage)
         // Önceki oturumların çevirileri motor ve dil çifti başına diskte durur; tekrar eden satır hemen gelir.
         let local = Translator(source: source, target: target,
                                cache: Self.translationCache(engine: Translator.engineID, source: source, target: target))
-        guard onlineTranslationActive, let key = store.load(String.self, for: StoreKey.deepLKey) else { return local }
-        return DeepLTranslator(key: key, fallback: local,
-                               cache: Self.translationCache(engine: DeepLTranslator.engineID, source: source, target: target))
+        let engine = settings.onlineEngine
+        guard onlineTranslationActive, let storeKey = engine.storeKey, let key = store.load(String.self, for: storeKey) else { return local }
+        let online: TextTranslator & OnlineTranslating
+        if let provider = engine.aiProvider {
+            let model = provider.model(settings.model(for: provider))
+            online = AITranslator(provider: provider, key: key, model: model, fallback: local,
+                                  cache: Self.translationCache(engine: provider.engineID(model: model), source: source, target: target))
+        } else {
+            online = DeepLTranslator(key: key, fallback: local,
+                                     cache: Self.translationCache(engine: DeepLTranslator.engineID, source: source, target: target))
+        }
+        // Hizmet çeviremeyince ana ekranda uyarı çıkar; düzelince kalkar.
+        online.onFailureChanged = { [weak self] state in
+            Task { @MainActor in self?.onlineIssue = state }
+        }
+        return online
     }
 
     /// ~/Library/Application Support/CouchSubs/Translations içindeki kalıcı çeviri önbelleği.
@@ -862,29 +969,24 @@ final class AppModel {
         return TranslationCache.shared(in: directory, engine: engine, source: source, target: target)
     }
 
-    /// DeepL yalnız İngilizce→Türkçe için açılır.
-    private var onlineTranslationActive: Bool {
-        settings.onlineTranslation && settings.sourceLanguage == "en" && settings.targetLanguage == "tr" && hasDeepLKey
+    /// Çevrimiçi çeviri yalnız İngilizce→Türkçe için ve seçili motorun anahtarı kayıtlıysa açılır.
+    var onlineTranslationActive: Bool {
+        settings.onlineTranslation && settings.sourceLanguage == "en" && settings.targetLanguage == "tr" && hasKey(settings.onlineEngine)
     }
 
-    /// Kayıtlı bir DeepL anahtarı var mı (anahtarın kendisi arayüze hiç dönmez).
-    var hasDeepLKey: Bool { deepLKeySaved }
-    private var deepLKeySaved = false
+    /// Anahtarı kayıtlı motorlar (anahtarların kendisi arayüze hiç dönmez).
+    private var savedKeys: Set<TranslationEngine> = []
 
-    /// Anahtar denenir; geçerliyse (kotası bitmiş olsa da) Anahtarlık'a yazılır ve çevrimiçi çeviri açılır.
+    func hasKey(_ engine: TranslationEngine) -> Bool { savedKeys.contains(engine) }
+
+    /// Kayıtlı bir DeepL anahtarı var mı.
+    var hasDeepLKey: Bool { hasKey(.deepL) }
+
+    /// Anahtar denenir; geçerliyse (kotası bitmiş olsa da) Anahtarlık'a yazılır ve DeepL seçilir.
     func setDeepLKey(_ key: String) async -> OnlineKeyCheck {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         let check = await services.checkOnlineKey(key)
-        if check.state == .valid || check.state == .quotaExceeded {
-            store.save(key, for: StoreKey.deepLKey)
-            deepLKeySaved = true
-            if settings.onlineTranslation {
-                if isRunning { makePipeline() }
-            } else {
-                settings.onlineTranslation = true
-            }
-            await refreshTranslatorStatus()
-        }
+        if check.state == .valid || check.state == .quotaExceeded { saveKey(key, for: .deepL) }
         return check
     }
 
@@ -894,10 +996,50 @@ final class AppModel {
         return await services.checkOnlineKey(key)
     }
 
-    func removeDeepLKey() {
-        store.remove(StoreKey.deepLKey)
-        deepLKeySaved = false
-        settings.onlineTranslation = false
+    func removeDeepLKey() { removeKey(.deepL) }
+
+    /// Yapay zekâ anahtarı örnek bir satırla denenir. Anahtar kabul edildiyse (bakiye bitmiş ya da model adı yanlış olsa
+    /// da) Anahtarlık'a yazılır ve bu motor seçilir.
+    func setAIKey(_ key: String, for provider: AIProvider) async -> Result<String, AIFailure> {
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider))
+        switch result {
+        case .success, .failure(.quotaExceeded), .failure(.modelRejected): saveKey(key, for: TranslationEngine(provider))
+        case .failure: break
+        }
+        return result
+    }
+
+    /// Kayıtlı anahtar ve modelle örnek satırı çevirir (ayarlardaki "Dene").
+    func testAIKey(for provider: AIProvider) async -> Result<String, AIFailure> {
+        guard let storeKey = TranslationEngine(provider).storeKey, let key = store.load(String.self, for: storeKey) else {
+            return .failure(.invalidKey)
+        }
+        return await services.testAIKey(provider: provider, key: key, model: settings.model(for: provider))
+    }
+
+    func removeKey(_ engine: TranslationEngine) {
+        guard let storeKey = engine.storeKey else { return }
+        store.remove(storeKey)
+        savedKeys.remove(engine)
+        if settings.translationEngine == engine {
+            settings.onlineTranslation = false
+        } else {
+            Task { await refreshTranslatorStatus() }
+        }
+    }
+
+    private func saveKey(_ key: String, for engine: TranslationEngine) {
+        guard let storeKey = engine.storeKey else { return }
+        store.save(key, for: storeKey)
+        savedKeys.insert(engine)
+        if settings.translationEngine == engine {
+            // Motor zaten seçiliydi, anahtar yeni geldi: hat yeni anahtarla kurulsun.
+            if isRunning { makePipeline() }
+            Task { await refreshTranslatorStatus() }
+        } else {
+            settings.translationEngine = engine
+        }
     }
 
     func stop() {
@@ -922,6 +1064,7 @@ final class AppModel {
         if let sleepActivity { ProcessInfo.processInfo.endActivity(sleepActivity) }
         sleepActivity = nil
         isRunning = false
+        onlineIssue = nil
         sessionState = .disconnected(.stopped)
     }
 

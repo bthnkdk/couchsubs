@@ -19,7 +19,7 @@ namespace CouchSubs.Translation;
 /// bağlamsız eski haliyle döner; anahtar yalnız satırın kendisidir.
 /// DeepL'e ulaşılamazsa ya da kota biterse o satır cihaz üstü modelle çevrilir; oyun hiç altyazısız kalmaz.
 /// </summary>
-public sealed class DeepLTranslator : ITextTranslator
+public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
 {
     /// <summary>Kalıcı önbellek dosyasındaki motor adı.</summary>
     public const string EngineId = "deepl";
@@ -51,6 +51,15 @@ public sealed class DeepLTranslator : ITextTranslator
     /// <summary>Son DeepL hatası; çeviri düzgün gidiyorsa null.</summary>
     public OnlineKeyState? LastError { get; private set; }
 
+    public event Action<OnlineKeyState?>? FailureChanged;
+
+    private void Report(OnlineKeyState? state)
+    {
+        if (LastError == state) return;
+        LastError = state;
+        FailureChanged?.Invoke(state);
+    }
+
     /// <summary>Ücretsiz anahtarlar ":fx" ile biter ve ayrı adrese gider.</summary>
     internal static Uri BaseUri(string key) =>
         new(key.Trim().EndsWith(":fx", StringComparison.Ordinal) ? "https://api-free.deepl.com/v2/" : "https://api.deepl.com/v2/");
@@ -78,12 +87,12 @@ public sealed class DeepLTranslator : ITextTranslator
         try
         {
             translated = sources.Count == 0 ? [] : await RequestAsync(sources, context, cancellationToken).ConfigureAwait(false);
-            LastError = null;
+            Report(null);
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or DeepLException
                                       && !cancellationToken.IsCancellationRequested)
         {
-            LastError = error is DeepLException deepL ? deepL.State : OnlineKeyState.Unreachable;
+            Report(error is DeepLException deepL ? deepL.State : OnlineKeyState.Unreachable);
             _pausedUntil = DateTimeOffset.UtcNow + RetryAfter;
             return await FallbackAsync(text, cancellationToken).ConfigureAwait(false);
         }

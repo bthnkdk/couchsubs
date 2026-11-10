@@ -3,9 +3,16 @@
 import CouchSubsCore
 import Foundation
 
-/// Çevrimiçi çeviri anahtarı (DeepL) denendiğinde ne çıktı.
+/// Çevrimiçi çeviri anahtarı (DeepL ya da yapay zekâ hizmeti) denendiğinde ne çıktı.
 enum OnlineKeyState: Equatable {
-    case valid, invalid, quotaExceeded, unreachable
+    /// `modelRejected`: hizmet model adını kabul etmedi (yalnız yapay zekâ hizmetlerinde).
+    case valid, invalid, quotaExceeded, modelRejected, unreachable
+}
+
+/// Çevrimiçi çevirmen hatasını bildirir; ana ekran "şu an çevirmiyor" uyarısını bundan gösterir.
+protocol OnlineTranslating: AnyObject {
+    /// Hata başlayınca durumla, düzelince nil ile çağrılır (yalnız değişince).
+    var onFailureChanged: ((OnlineKeyState?) -> Void)? { get set }
 }
 
 struct OnlineKeyCheck: Equatable {
@@ -21,7 +28,7 @@ struct OnlineKeyCheck: Equatable {
 /// the context parameter will not be counted toward billing", developers.deepl.com/docs/api-reference/translate,
 /// Kasım 2026). Önbellekteki çeviri bağlamsız eski haliyle döner; anahtar yalnız satırın kendisidir.
 /// DeepL'e ulaşılamazsa ya da kota biterse o satır Apple'ın cihaz üstü çevirisiyle çevrilir; oyun altyazısız kalmaz.
-final class DeepLTranslator: TextTranslator {
+final class DeepLTranslator: TextTranslator, OnlineTranslating {
     /// Kalıcı önbellek dosyasındaki motor adı.
     static let engineID = "deepl"
     /// Bağlama giden önceki satır sayısı.
@@ -38,6 +45,8 @@ final class DeepLTranslator: TextTranslator {
     /// Son gösterilen satırlar, eskiden yeniye.
     private var recent: [String] = []
     private var pausedUntil = Date.distantPast
+    private var failure: OnlineKeyState?
+    var onFailureChanged: ((OnlineKeyState?) -> Void)?
 
     /// `cache`: kalıcı önbellek; verilmezse yalnız bellekte tutulur.
     init(key: String, fallback: TextTranslator, session: URLSession = DeepLTranslator.makeSession(),
@@ -75,9 +84,11 @@ final class DeepLTranslator: TextTranslator {
         let translated: [String]
         do {
             translated = sources.isEmpty ? [] : try await request(sources, context: context)
+            report(nil)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            report((error as? DeepLError)?.state ?? .unreachable)
             pausedUntil = Date().addingTimeInterval(Self.retryAfter)
             return try await fallback.translate(text)
         }
@@ -90,6 +101,12 @@ final class DeepLTranslator: TextTranslator {
         speech[text] = SpeechScript.lines(pieces: pieces, translations: translations)
         cache.store(result, for: text)
         return result
+    }
+
+    private func report(_ state: OnlineKeyState?) {
+        guard state != failure else { return }
+        failure = state
+        onFailureChanged?(state)
     }
 
     private func shown(_ text: String) {

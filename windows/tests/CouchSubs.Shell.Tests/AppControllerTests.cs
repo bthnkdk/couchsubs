@@ -117,6 +117,19 @@ internal sealed class FakeServices : IAppServices
         OnlineTranslators.Add((key, fallback));
         return fallback ?? Translation.Create("en", "tr");
     }
+    public AiTestResult AiTest { get; set; } = new(OnlineKeyState.Valid, "KRATOS: Şimdi gidiyoruz.");
+    public List<(AiProvider Provider, string Key, string Model)> AiTests { get; } = [];
+    public List<(AiProvider Provider, string Key, string Model)> AiTranslators { get; } = [];
+    public Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model)
+    {
+        AiTests.Add((provider, key, model));
+        return Task.FromResult(AiTest);
+    }
+    public ITextTranslator? MakeAiTranslator(AiProvider provider, string key, string model, ITextTranslator? fallback)
+    {
+        AiTranslators.Add((provider, key, model));
+        return fallback ?? Translation.Create("en", "tr");
+    }
 
     public Task<IReadOnlyList<ConsoleInfo>> DiscoverConsolesAsync() => Task.FromResult<IReadOnlyList<ConsoleInfo>>(Consoles);
     public Task<byte[]> AccountIdFromRedirectAsync(Uri redirect) => Task.FromResult(Enumerable.Repeat((byte)1, 8).ToArray());
@@ -519,6 +532,49 @@ public class AppControllerRunTests
         Assert.False(controller.Settings.OnlineTranslation);
         Assert.Equal(TranslatorStatus.NeedsDownload, controller.TranslatorStatus);
         controller.Dispose();
+    }
+
+    /// Yapay zekâ anahtarı yalnız kabul edilirse saklanır; seçilen model ve anahtar çevirmene gider.
+    [Fact]
+    public async Task AiKeyIsSavedOnlyWhenAcceptedAndSelectsTheEngine()
+    {
+        var services = new FakeServices { AiTest = new AiTestResult(OnlineKeyState.Invalid) };
+        var (controller, _, _) = Ready(services);
+        Assert.Equal(OnlineKeyState.Invalid, (await controller.SetAiKeyAsync(AiProvider.Claude, " wrong ")).State);
+        Assert.Equal((AiProvider.Claude, "wrong", "claude-haiku-5-5"), Assert.Single(services.AiTests));
+        Assert.False(controller.HasKey(TranslationEngine.Claude));
+        Assert.Equal(TranslationEngine.Free, controller.Settings.Engine);
+
+        services.AiTest = new AiTestResult(OnlineKeyState.Valid, "KRATOS: Şimdi gidiyoruz.");
+        controller.Settings = controller.Settings.WithModel(AiProvider.Claude, "claude-sonnet-5-5");
+        await controller.SetAiKeyAsync(AiProvider.Claude, "sk-good");
+        Assert.True(controller.HasKey(TranslationEngine.Claude));
+        Assert.Equal(TranslationEngine.Claude, controller.Settings.Engine);
+        Assert.False(controller.HasDeepLKey);
+
+        await controller.StartAsync();
+        Assert.Equal((AiProvider.Claude, "sk-good", "claude-sonnet-5-5"), Assert.Single(services.AiTranslators));
+        Assert.Empty(services.OnlineTranslators);
+
+        // Varsayılan modele dönülünce ayarda boş kalır.
+        Assert.Equal("", controller.Settings.WithModel(AiProvider.Claude, "claude-haiku-5-5").ClaudeModel);
+
+        controller.RemoveKey(TranslationEngine.Claude);
+        Assert.False(controller.HasKey(TranslationEngine.Claude));
+        Assert.Equal(TranslationEngine.Free, controller.Settings.Engine);
+        controller.Dispose();
+    }
+
+    /// Eski sürümlerin ayarı (yalnız DeepL açık/kapalı) DeepL olarak açılır.
+    [Fact]
+    public void OldSettingsOpenWithDeepL()
+    {
+        var old = System.Text.Json.JsonSerializer.Deserialize<UserSettings>("""{"OnlineTranslation":true}""")!;
+        Assert.Equal(TranslationEngine.DeepL, old.Engine);
+        var saved = System.Text.Json.JsonSerializer.Serialize(new UserSettings().WithEngine(TranslationEngine.Gemini));
+        Assert.Contains("\"OnlineEngine\":\"Gemini\"", saved);
+        Assert.Equal(TranslationEngine.Gemini, System.Text.Json.JsonSerializer.Deserialize<UserSettings>(saved)!.Engine);
+        Assert.Equal(TranslationEngine.Free, new UserSettings().WithEngine(TranslationEngine.Gemini).WithEngine(TranslationEngine.Free).Engine);
     }
 
     /// Windows'ta oyun dilinin OCR paketi yoksa ana ekran bunu söyler.

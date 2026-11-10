@@ -38,7 +38,8 @@ public partial class MainView : UserControl
 
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.TranslatorStatus) or nameof(AppController.ModelInstalled))
+        if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.TranslatorStatus) or nameof(AppController.ModelInstalled)
+            or nameof(AppController.OnlineIssue))
             Refresh();
         if (e.PropertyName is nameof(AppController.UpdateVersion) or nameof(AppController.Updating)
             or nameof(AppController.UpdateProgress) or nameof(AppController.UpdateError))
@@ -67,6 +68,15 @@ public partial class MainView : UserControl
         ToggleGlyph.Text = running ? Glyphs.Stop : Glyphs.Play;
         ToggleText.Text = Localizer.Current[running ? "Stop translating" : "Start translating"];
         ModelCard.Visibility = controller.ModelInstalled ? Visibility.Collapsed : Visibility.Visible;
+        // Çevrimiçi motor çeviremiyor; satırlar bu arada cihaz üstü modelle geliyor.
+        var issue = running ? controller.OnlineIssue : null;
+        OnlineCard.Visibility = issue is null ? Visibility.Collapsed : Visibility.Visible;
+        if (issue is { } state)
+        {
+            var engine = controller.Settings.OnlineEngine;
+            OnlineTitle.Text = Localizer.Current.Format("%@ is not translating right now", engine.DisplayName());
+            OnlineReason.Text = state.Describe(engine, Localizer.Current) + " " + Localizer.Current["Meanwhile the free translation is used."];
+        }
     }
 
     private async void OnToggle(object sender, RoutedEventArgs e)
