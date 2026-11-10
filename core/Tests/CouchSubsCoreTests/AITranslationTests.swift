@@ -121,6 +121,8 @@ final class AITranslationTests: XCTestCase {
         let system = ((body["systemInstruction"] as? [String: Any])?["parts"] as? [[String: Any]])?.first?["text"] as? String
         XCTAssertEqual(system, AIRequest.systemPrompt)
         XCTAssertEqual((body["generationConfig"] as? [String: Any])?["maxOutputTokens"] as? Int, AIRequest.maxOutputTokens)
+        // Flash-Lite zaten en az düşünmeyle çalışır; düşünme ayarı gönderilmez.
+        XCTAssertNil((body["generationConfig"] as? [String: Any])?["thinkingConfig"])
         // Konuşmacı etiketi gönderilmez; yalnız cümle gider.
         XCTAssertTrue(user(0).hasSuffix("[\"We go now.\"]"))
         XCTAssertFalse(user(0).contains("KRATOS"))
@@ -153,13 +155,48 @@ final class AITranslationTests: XCTestCase {
         XCTAssertEqual((body["thinking"] as? [String: Any])?["type"] as? String, "disabled")
     }
 
-    func testCustomModelIsUsedAndHasItsOwnEngineID() async throws {
-        _ = try await make(.openAI, model: " gpt-6.1-sol ").translate("Run!", fallback: local)
-        XCTAssertEqual(FakeAI.requests[0].body["model"] as? String, "gpt-6.1-sol")
-        XCTAssertEqual(FakeAI.requests[0].body["reasoning_effort"] as? String, "low")
+    /// Effort ve düşünme ayarı listedeki modelden gelir, adından tahmin edilmez.
+    func testPerModelParametersAreSent() async throws {
+        _ = try await make(.openAI, model: "gpt-6.1-terra").translate("Run!", fallback: local)
+        XCTAssertEqual(FakeAI.requests[0].body["model"] as? String, "gpt-6.1-terra")
+        XCTAssertEqual(FakeAI.requests[0].body["reasoning_effort"] as? String, "none")
+
+        _ = try await make(.claude, model: "claude-sonnet-5-5").translate("Run!", fallback: local)
+        XCTAssertEqual(FakeAI.requests[1].body["model"] as? String, "claude-sonnet-5-5")
+        XCTAssertEqual((FakeAI.requests[1].body["output_config"] as? [String: Any])?["effort"] as? String, "low")
+        XCTAssertEqual((FakeAI.requests[1].body["thinking"] as? [String: Any])?["type"] as? String, "between_tools")
+
+        _ = try await make(.gemini, model: "gemini-3.6-flash").translate("Run!", fallback: local)
+        XCTAssertTrue(FakeAI.requests[2].request.url!.absoluteString.contains("/models/gemini-3.6-flash:generateContent"))
+        let config = FakeAI.requests[2].body["generationConfig"] as? [String: Any]
+        XCTAssertEqual((config?["thinkingConfig"] as? [String: Any])?["thinkingLevel"] as? String, "LOW")
+    }
+
+    /// Listede olmayan kayıtlı model (eski ayar, elle yazılmış ad, listeden çıkarılan model) varsayılana döner.
+    func testUnknownModelFallsBackToDefault() async throws {
+        _ = try await make(.openAI, model: "gpt-4o").translate("Run!", fallback: local)
+        XCTAssertEqual(FakeAI.requests[0].body["model"] as? String, "gpt-6-luna")
+        XCTAssertEqual(AIProvider.gemini.model("").id, "gemini-3.5-flash-lite")
+        XCTAssertEqual(AIProvider.claude.model(nil).id, "claude-haiku-5-5")
         XCTAssertEqual(AIProvider.gemini.engineID(model: "gemini-3.5-flash-lite"), "gemini:gemini-3.5-flash-lite")
-        XCTAssertEqual(AIProvider.openAI.engineID(model: "gpt-6-luna"), "openai:gpt-6-luna")
-        XCTAssertEqual(AIProvider.claude.engineID(model: AIProvider.claude.model("")), "claude:claude-haiku-5-5")
+        XCTAssertEqual(AIProvider.openAI.engineID(model: AIProvider.openAI.defaultModel.id), "openai:gpt-6-luna")
+    }
+
+    /// Liste Windows ile ortak dosyadan okunur; her hizmette önerilen hızlı model ilk sıradadır.
+    func testCatalogIsTheSharedFile() throws {
+        for provider in AIProvider.allCases {
+            XCTAssertGreaterThanOrEqual(provider.models.count, 2, provider.rawValue)
+            XCTAssertEqual(provider.defaultModel.label, "Fast and cheap (recommended)")
+            XCTAssertEqual(Set(provider.models.map(\.id)).count, provider.models.count)
+        }
+        XCTAssertEqual(AIProvider.gemini.defaultModel, AIModel(id: "gemini-3.5-flash-lite", label: "Fast and cheap (recommended)"))
+        XCTAssertEqual(AIProvider.claude.defaultModel.thinking, "disabled")
+        // Depodaki dosya, uygulamaya giden kopyayla aynıdır; Windows da bu dosyayı gömer.
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("Sources/CouchSubsCore/Resources/ai-models.json")
+        let parsed = AIModel.parse(try Data(contentsOf: file))
+        XCTAssertEqual(parsed, AIModel.catalog)
+        XCTAssertEqual(Set(parsed.keys), Set(AIProvider.allCases.map(\.rawValue)))
     }
 
     /// Son gösterilen 3 satır ve çevirileri bağlam olarak gider; satırın kendisi ve tekrar okunan satır girmez.

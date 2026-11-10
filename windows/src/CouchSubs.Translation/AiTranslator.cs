@@ -60,7 +60,7 @@ public static class AiRequest
     }
 
     /// <summary>Hizmete giden HTTP isteği.</summary>
-    public static HttpRequestMessage Build(AiProvider provider, string key, string model, IReadOnlyList<string> sentences,
+    public static HttpRequestMessage Build(AiProvider provider, string key, AiModel model, IReadOnlyList<string> sentences,
                                            IReadOnlyList<AiContextLine> context, string? game = null)
     {
         key = key.Trim();
@@ -72,9 +72,9 @@ public static class AiRequest
             case AiProvider.Gemini:
                 // https://ai.google.dev/api/generate-content (aistudio.google.com/api-reference/generate-content):
                 // POST /v1beta/models/{model}:generateContent, anahtar "x-goog-api-key" başlığında.
-                // Gemini 3.6 Flash ve sonrası temperature'ı yok sayıyor; Flash-Lite zaten en az düşünmeyle çalışıyor.
+                // Gemini 3.6 Flash ve sonrası temperature'ı yok sayıyor; düşünme düzeyi listedeki modelle gelir.
                 request = new HttpRequestMessage(HttpMethod.Post,
-                    $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model)}:generateContent");
+                    $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model.Id)}:generateContent");
                 request.Headers.Add("x-goog-api-key", key);
                 body = new JsonObject
                 {
@@ -86,6 +86,7 @@ public static class AiRequest
                     }),
                     ["generationConfig"] = new JsonObject { ["maxOutputTokens"] = MaxOutputTokens },
                 };
+                if (model.Thinking is { } level) body["generationConfig"]!["thinkingConfig"] = new JsonObject { ["thinkingLevel"] = level };
                 break;
             case AiProvider.OpenAi:
                 // https://platform.openai.com/docs/api-reference/chat/create (developers.openai.com/api/reference):
@@ -94,39 +95,35 @@ public static class AiRequest
                 request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {key}");
                 body = new JsonObject
                 {
-                    ["model"] = model,
+                    ["model"] = model.Id,
                     ["messages"] = new JsonArray(
                         new JsonObject { ["role"] = "developer", ["content"] = SystemPrompt },
                         new JsonObject { ["role"] = "user", ["content"] = user }),
                     ["max_completion_tokens"] = MaxOutputTokens,
-                    ["reasoning_effort"] = OpenAiEffort(model),
                 };
+                if (model.Effort is { } effort) body["reasoning_effort"] = effort;
                 break;
             default:
                 // https://docs.anthropic.com/en/api/messages (platform.claude.com/docs/en/api/messages): POST /v1/messages,
-                // "x-api-key" ve "anthropic-version". Yeni modellerde temperature gönderilmez; hız için effort "low",
-                // Haiku 5.5'te düşünme kapalı (platform.claude.com/docs/en/build-with-claude/effort).
+                // "x-api-key" ve "anthropic-version". Yeni modellerde temperature gönderilmez; effort ve düşünme listedeki
+                // modelle gelir (platform.claude.com/docs/en/build-with-claude/effort).
                 request = new HttpRequestMessage(HttpMethod.Post, "https://api.anthropic.com/v1/messages");
                 request.Headers.Add("x-api-key", key);
                 request.Headers.Add("anthropic-version", "2023-06-01");
                 body = new JsonObject
                 {
-                    ["model"] = model,
+                    ["model"] = model.Id,
                     ["max_tokens"] = MaxOutputTokens,
                     ["system"] = SystemPrompt,
                     ["messages"] = new JsonArray(new JsonObject { ["role"] = "user", ["content"] = user }),
-                    ["output_config"] = new JsonObject { ["effort"] = "low" },
                 };
-                if (model.StartsWith("claude-haiku-5", StringComparison.Ordinal)) body["thinking"] = new JsonObject { ["type"] = "disabled" };
+                if (model.Effort is { } claudeEffort) body["output_config"] = new JsonObject { ["effort"] = claudeEffort };
+                if (model.Thinking is { } thinking) body["thinking"] = new JsonObject { ["type"] = thinking };
                 break;
         }
         request.Content = new StringContent(body.ToJsonString(Compact), Encoding.UTF8, "application/json");
         return request;
     }
-
-    /// <summary>"none" yalnız hızlı modellerde var; diğerlerinde en düşük ortak düzey "low".</summary>
-    internal static string OpenAiEffort(string model) =>
-        model.Contains("luna", StringComparison.Ordinal) || model.Contains("terra", StringComparison.Ordinal) ? "none" : "low";
 
     /// <summary>Yanıttaki düz metin (düşünme bölümleri atlanır).</summary>
     public static string Text(AiProvider provider, string json)
@@ -233,7 +230,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     private DateTimeOffset _pausedUntil = DateTimeOffset.MinValue;
     private OnlineKeyState? _failure;
 
-    /// <param name="model">Boşsa hizmetin varsayılan modeli.</param>
+    /// <param name="model">Kayıtlı model kimliği; listede yoksa varsayılan model.</param>
     /// <param name="cache">Kalıcı önbellek; verilmezse yalnız bellekte tutulur.</param>
     public AiTranslator(AiProvider provider, string key, string? model, ITextTranslator? fallback, HttpClient? http = null,
                         TranslationCache? cache = null)
@@ -247,7 +244,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     }
 
     public AiProvider Provider { get; }
-    public string Model { get; }
+    public AiModel Model { get; }
 
     /// <summary>Son hata; çeviri düzgün gidiyorsa null.</summary>
     public OnlineKeyState? LastError => _failure;

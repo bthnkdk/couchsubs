@@ -12,6 +12,7 @@
     <EmbeddedResource Include="..\..\..\design\tokens.json" LogicalName="tokens.json" />
     <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\obs-overlay.html" LogicalName="obs-overlay.html" />
     <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\glossary-en-tr.json" LogicalName="glossary-en-tr.json" />
+    <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\ai-models.json" LogicalName="ai-models.json" />
     <EmbeddedResource Include="..\..\..\mac\CouchSubs\Resources\Localizable.xcstrings" LogicalName="Localizable.xcstrings" />
   </ItemGroup>
 

@@ -4609,18 +4609,18 @@
         }
       }
     },
-    "%@ did not accept the model name. Check it under Advanced.": {
+    "%@ did not accept the request. Choose the other model or try again later.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ did not accept the model name. Check it under Advanced."
+            "value": "%@ did not accept the request. Choose the other model or try again later."
           }
         },
         "tr": {
           "stringUnit": {
             "state": "translated",
-            "value": "%@ model adını kabul etmedi. Gelişmiş bölümünden denetleyin."
+            "value": "%@ isteği kabul etmedi. Diğer modeli seçin ya da daha sonra yeniden deneyin."
           }
         }
       }
@@ -4753,22 +4753,6 @@
         }
       }
     },
-    "Advanced": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Advanced"
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Gelişmiş"
-          }
-        }
-      }
-    },
     "Model": {
       "localizations": {
         "en": {
@@ -4781,22 +4765,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "Model"
-          }
-        }
-      }
-    },
-    "Leave the default unless you want another model of the same service. Faster, cheaper models suit subtitles best.": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Leave the default unless you want another model of the same service. Faster, cheaper models suit subtitles best."
-          }
-        },
-        "tr": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Aynı hizmetin başka bir modelini istemiyorsanız varsayılanı bırakın. Altyazı için hızlı ve ucuz modeller en uygunudur."
           }
         }
       }
@@ -4829,6 +4797,38 @@
           "stringUnit": {
             "state": "translated",
             "value": "Bu arada ücretsiz çeviri kullanılıyor."
+          }
+        }
+      }
+    },
+    "Fast and cheap (recommended)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fast and cheap (recommended)"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hızlı ve ucuz (önerilen)"
+          }
+        }
+      }
+    },
+    "Better quality, a little slower": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Better quality, a little slower"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daha kaliteli, biraz daha yavaş"
           }
         }
       }

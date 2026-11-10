@@ -556,12 +556,24 @@ public class AppControllerRunTests
         Assert.Equal((AiProvider.Claude, "sk-good", "claude-sonnet-5-5"), Assert.Single(services.AiTranslators));
         Assert.Empty(services.OnlineTranslators);
 
-        // Varsayılan modele dönülünce ayarda boş kalır.
-        Assert.Equal("", controller.Settings.WithModel(AiProvider.Claude, "claude-haiku-5-5").ClaudeModel);
 
         controller.RemoveKey(TranslationEngine.Claude);
         Assert.False(controller.HasKey(TranslationEngine.Claude));
         Assert.Equal(TranslationEngine.Free, controller.Settings.Engine);
+        controller.Dispose();
+    }
+
+    /// Listede olmayan kayıtlı model (eski sürümün boş alanı, elle yazılmış ad) varsayılana döner ve hemen kaydedilir.
+    [Fact]
+    public void UnknownSavedModelFallsBackToDefaultAndIsSaved()
+    {
+        var settingsStore = new MemorySettings();
+        settingsStore.Save(new UserSettings { OpenAiModel = "gpt-4o", GeminiModel = "", ClaudeModel = "claude-sonnet-5-5" });
+        var controller = AppControllerTests.Make(settings: settingsStore);
+        Assert.Equal("gpt-6-luna", controller.Settings.OpenAiModel);
+        Assert.Equal("gemini-3.5-flash-lite", controller.Settings.GeminiModel);
+        Assert.Equal("claude-sonnet-5-5", controller.Settings.ClaudeModel);
+        Assert.Equal(controller.Settings, settingsStore.Saved);
         controller.Dispose();
     }
 

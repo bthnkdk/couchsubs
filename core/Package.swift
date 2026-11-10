@@ -10,7 +10,7 @@ let package = Package(
         .library(name: "CouchSubsCore", targets: ["CouchSubsCore"]),
     ],
     targets: [
-        .target(name: "CouchSubsCore", resources: [.copy("Resources/obs-overlay.html"), .copy("Resources/glossary-en-tr.json")], swiftSettings: [.swiftLanguageMode(.v5)]),
+        .target(name: "CouchSubsCore", resources: [.copy("Resources/obs-overlay.html"), .copy("Resources/glossary-en-tr.json"), .copy("Resources/ai-models.json")], swiftSettings: [.swiftLanguageMode(.v5)]),
         .executableTarget(name: "tv-smoke", dependencies: ["CouchSubsCore"], swiftSettings: [.swiftLanguageMode(.v5)]),
         .testTarget(name: "CouchSubsCoreTests", dependencies: ["CouchSubsCore"], swiftSettings: [.swiftLanguageMode(.v5)]),
     ]
