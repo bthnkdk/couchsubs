@@ -74,8 +74,14 @@ public final class SubtitleServer: @unchecked Sendable {
 
     public var onClientsChanged: ((Int) -> Void)?
 
-    public init(port: UInt16 = 8787) {
+    /// Bağlantı canlı tutma çerçevesi: yorum satırını EventSource görmez; adlı "ping" olayını TV görür ve
+    /// bir süre gelmezse yarı açık kalmış bağlantıyı kapatıp yeniden bağlanır (Windows ile aynı).
+    static let pingFrame = ": ping\n\nevent: ping\ndata: {}\n\n"
+    private let pingInterval: TimeInterval
+
+    public init(port: UInt16 = 8787, pingInterval: TimeInterval = 15) {
         requestedPort = port
+        self.pingInterval = pingInterval
     }
 
     public var connectedClients: Int {
@@ -98,6 +104,8 @@ public final class SubtitleServer: @unchecked Sendable {
         tcp.keepaliveIdle = 10
         tcp.keepaliveInterval = 5
         tcp.keepaliveCount = 3
+        // Altyazı çerçeveleri küçüktür; Nagle beklemesi her satırı TV'ye geç ulaştırmasın.
+        tcp.noDelay = true
         let listener = try NWListener(using: NWParameters(tls: nil, tcp: tcp), on: port)
         self.listener = listener
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
@@ -315,8 +323,8 @@ public final class SubtitleServer: @unchecked Sendable {
 
     private func startPing() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 15, repeating: 15)
-        timer.setEventHandler { [weak self] in self?.sendToAll(Data(": ping\n\n".utf8)) }
+        timer.schedule(deadline: .now() + pingInterval, repeating: pingInterval)
+        timer.setEventHandler { [weak self] in self?.sendToAll(Data(Self.pingFrame.utf8)) }
         timer.resume()
         pingTimer = timer
     }

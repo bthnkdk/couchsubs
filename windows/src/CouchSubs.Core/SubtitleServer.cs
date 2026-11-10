@@ -46,7 +46,7 @@ public interface ISubtitleSender
 /// TV uygulamasının bağlandığı yerel Server-Sent Events sunucusu.
 /// <c>GET /events</c> akışında <c>subtitle</c>, <c>clear</c> ve <c>style</c> olaylarını yayınlar.
 /// </summary>
-public sealed class SubtitleServer(int port = 8787) : ISubtitleSender, IDisposable
+public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = null) : ISubtitleSender, IDisposable
 {
     private sealed class Client(TcpClient tcp, bool viewer = false)
     {
@@ -63,6 +63,12 @@ public sealed class SubtitleServer(int port = 8787) : ISubtitleSender, IDisposab
         // Türkçe harfler ı gibi kaçışlarla değil olduğu gibi gönderilir.
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
+
+    /// <summary>
+    /// Bağlantı canlı tutma çerçevesi: yorum satırını EventSource görmez; adlı "ping" olayını TV görür ve
+    /// bir süre gelmezse yarı açık kalmış bağlantıyı kapatıp yeniden bağlanır (Mac ile aynı).
+    /// </summary>
+    internal const string PingFrame = ": ping\n\nevent: ping\ndata: {}\n\n";
 
     private readonly object gate = new();
     private readonly List<Client> clients = [];
@@ -103,7 +109,8 @@ public sealed class SubtitleServer(int port = 8787) : ISubtitleSender, IDisposab
         listener.Start();
         this.listener = listener;
         _ = AcceptLoop(listener);
-        pingTimer = new Timer(_ => Broadcast(": ping\n\n"), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+        var every = pingInterval ?? TimeSpan.FromSeconds(15);
+        pingTimer = new Timer(_ => Broadcast(PingFrame), null, every, every);
         return Task.FromResult(((IPEndPoint)listener.LocalEndpoint).Port);
     }
 
@@ -225,6 +232,8 @@ public sealed class SubtitleServer(int port = 8787) : ISubtitleSender, IDisposab
         try
         {
             EnableKeepAlive(tcp.Client);
+            // Altyazı çerçeveleri küçüktür; Nagle beklemesi her satırı TV'ye geç ulaştırmasın.
+            tcp.NoDelay = true;
             var stream = tcp.GetStream();
             var requestLine = await ReadRequestLine(stream);
             var parts = requestLine?.Split(' ') ?? [];

@@ -49,6 +49,9 @@ internal sealed class OnnxMarianEngine : ISentenceEngine
         {
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
             ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+            // Bütün çekirdekleri alırsa yazı tanımayla yarışır, okuma yavaşlar; yarısı çeviriye yeter.
+            IntraOpNumThreads = Math.Max(1, Environment.ProcessorCount / 2),
+            InterOpNumThreads = 1,
         };
         // Bellek havuzunu ya da ağırlık ön paketlemeyi kapatmak denendi: yüklemede bellek düşse de
         // çeviriler başladıktan sonra bellek artıyor, satır süresi de %20'ye kadar uzuyordu. Varsayılanlar kalır.
