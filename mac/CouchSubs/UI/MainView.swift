@@ -67,6 +67,21 @@ struct MainView: View {
                 }
             }
 
+            // Çevrimiçi motor çeviremiyor: satırlar bu arada ücretsiz çeviriyle geliyor.
+            if model.isRunning, let issue = model.onlineIssue {
+                Card {
+                    Label(String(format: String(localized: "%@ is not translating right now"), model.settings.onlineEngine.displayName),
+                          systemImage: "exclamationmark.triangle")
+                        .font(.csBody.weight(.semibold))
+                        .foregroundStyle(Color.csWarning)
+                    Text(verbatim: TranslationCard.describe(issue, engine: model.settings.onlineEngine) + " "
+                         + String(localized: "Meanwhile the free translation is used."))
+                        .font(.csCallout)
+                        .foregroundStyle(Color.csSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             if let free = model.readingFailedFreeGB {
                 Card {
                     Label("macOS can't read the text on the screen.", systemImage: "exclamationmark.triangle")

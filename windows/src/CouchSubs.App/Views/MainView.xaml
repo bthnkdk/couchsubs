@@ -67,6 +67,14 @@
                 </StackPanel>
             </c:Card>
 
+            <!-- Çevrimiçi motor çeviremiyor: satırlar bu arada ücretsiz çeviriyle geliyor -->
+            <c:Card x:Name="OnlineCard" Margin="0,16,0,0" Visibility="Collapsed">
+                <StackPanel>
+                    <TextBlock x:Name="OnlineTitle" FontWeight="SemiBold" Foreground="{DynamicResource warningBrush}" TextWrapping="Wrap" />
+                    <TextBlock x:Name="OnlineReason" Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap" />
+                </StackPanel>
+            </c:Card>
+
             <!-- Yazı tanıma dili eksik -->
             <c:Card Margin="0,16,0,0" Visibility="{Binding OcrMissing, Converter={StaticResource VisibleIf}}">
                 <StackPanel>

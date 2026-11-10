@@ -82,7 +82,7 @@ struct SettingsView: View {
                             Text("Spanish").tag("es")
                         }
                     }
-                    DeepLCard()
+                    TranslationCard()
                     Card(title: "Subtitle area") {
                         RegionPicker(region: $model.settings.region, frame: model.lastFrame)
                         HintText(text: "Adjust the frame so it covers where the game shows its subtitles.")
@@ -141,41 +141,90 @@ struct SettingsView: View {
     }
 }
 
-/// İsteğe bağlı çevrimiçi çeviri: kullanıcının kendi DeepL anahtarı.
-struct DeepLCard: View {
+/// Çeviri motoru: ücretsiz cihaz üstü çeviri ya da kullanıcının kendi anahtarıyla DeepL, Gemini, OpenAI, Claude
+/// (Windows'taki ayarlarla aynı düzen).
+struct TranslationCard: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        let engine = model.settings.translationEngine
+        Card(title: "Translation") {
+            Picker("Translation engine", selection: $model.settings.translationEngine) {
+                Text("Free (on this Mac)").tag(TranslationEngine.free)
+                Text(verbatim: "DeepL").tag(TranslationEngine.deepL)
+                Text(verbatim: "Google Gemini").tag(TranslationEngine.gemini)
+                Text(verbatim: "OpenAI").tag(TranslationEngine.openAI)
+                Text(verbatim: "Anthropic Claude").tag(TranslationEngine.claude)
+            }
+            HintText(text: Self.explanation(engine))
+            if engine != .free, model.settings.sourceLanguage != "en" {
+                HintText(text: "Online engines translate English games only. For other game languages the free translation is used.")
+            }
+            switch engine {
+            case .free: EmptyView()
+            case .deepL: DeepLKeySection()
+            case .gemini, .openAI, .claude:
+                if let provider = engine.aiProvider { AIKeySection(provider: provider).id(provider) }
+            }
+        }
+    }
+
+    private static func explanation(_ engine: TranslationEngine) -> LocalizedStringKey {
+        switch engine {
+        case .free: "Free. Apple's translation runs on this Mac; subtitle text never leaves it."
+        case .deepL: "Optional. With your own free DeepL key, translations read more naturally. Subtitle text is sent to DeepL; when DeepL cannot be reached, the translation model on this computer takes over."
+        case .gemini: "Google's AI translates with the game's tone and keeps names as they are. Subtitle text is sent to Google with your own key, and any cost is billed to your Google account. When Gemini cannot be reached, the free translation takes over."
+        case .openAI: "OpenAI's AI translates with the game's tone and keeps names as they are. Subtitle text is sent to OpenAI with your own key, and any cost is billed to your OpenAI account. When OpenAI cannot be reached, the free translation takes over."
+        case .claude: "Anthropic's Claude translates with the game's tone and keeps names as they are. Subtitle text is sent to Anthropic with your own key, and any cost is billed to your Anthropic account. When Claude cannot be reached, the free translation takes over."
+        }
+    }
+
+    /// Çevrimiçi motor hatasının kullanıcıya söylenişi (ayarlar ve ana ekran aynı metni kullanır).
+    static func describe(_ state: OnlineKeyState, engine: TranslationEngine) -> String {
+        let name = engine.displayName
+        return switch state {
+        case .valid: String(localized: "It works.")
+        case .invalid: String(format: String(localized: "%@ did not accept this key. Copy it again from your account page."), name)
+        case .quotaExceeded: String(format: String(localized: "Your %@ account has no credit left or has reached its limit."), name)
+        case .modelRejected: String(format: String(localized: "%@ did not accept the model name. Check it under Advanced."), name)
+        case .unreachable: String(format: String(localized: "%@ could not be reached. Check your internet connection."), name)
+        }
+    }
+}
+
+/// DeepL anahtarı: kaydedilince bu ayki kullanım görünür.
+private struct DeepLKeySection: View {
     @Environment(AppModel.self) private var model
     @State private var key = ""
     @State private var checking = false
     @State private var status: OnlineKeyCheck?
 
     var body: some View {
-        @Bindable var model = model
-        Card(title: "Online translation (DeepL)") {
-            HintText(text: "Optional. With your own free DeepL key, translations read more naturally. Subtitle text is sent to DeepL; when DeepL cannot be reached, the translation model on this computer takes over.")
-            if model.hasDeepLKey {
-                Toggle("Translate with DeepL", isOn: $model.settings.onlineTranslation)
-                Button("Remove key") {
-                    model.removeDeepLKey()
-                    status = nil
+        if model.hasDeepLKey {
+            Button("Remove key") {
+                model.removeDeepLKey()
+                status = nil
+            }
+            .buttonStyle(.secondary)
+        } else {
+            HStack(spacing: Theme.space("m")) {
+                SecureField("DeepL API key", text: $key).textFieldStyle(.roundedBorder)
+                Button("Save and test") {
+                    checking = true
+                    Task {
+                        status = await model.setDeepLKey(key)
+                        if model.hasDeepLKey { key = "" }
+                        checking = false
+                    }
                 }
                 .buttonStyle(.secondary)
-            } else {
-                HStack(spacing: Theme.space("m")) {
-                    SecureField("DeepL API key", text: $key).textFieldStyle(.roundedBorder)
-                    Button("Save and test") {
-                        checking = true
-                        Task {
-                            status = await model.setDeepLKey(key)
-                            if model.hasDeepLKey { key = "" }
-                            checking = false
-                        }
-                    }
-                    .buttonStyle(.secondary)
-                    .disabled(checking || key.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
-                Link("Get a free DeepL API key", destination: URL(string: "https://www.deepl.com/pro-api")!)
-                    .font(.csCallout)
+                .disabled(checking || key.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+            Link("Get a free DeepL API key", destination: URL(string: "https://www.deepl.com/pro-api")!)
+                .font(.csCallout)
+        }
+        Group {
             if let status {
                 Text(Self.describe(status))
                     .font(.csCallout)
@@ -197,8 +246,100 @@ struct DeepLCard: View {
             String(localized: "This month's DeepL limit is used up. Until it renews, the translation model on this computer translates.")
         case .invalid:
             String(localized: "DeepL did not accept this key. Copy it again from your DeepL account page.")
-        case .unreachable:
+        case .unreachable, .modelRejected:
             String(localized: "DeepL could not be reached. Check your internet connection.")
+        }
+    }
+}
+
+/// Yapay zekâ anahtarı, model adı (gelişmiş) ve örnek satırla deneme.
+private struct AIKeySection: View {
+    @Environment(AppModel.self) private var model
+    let provider: AIProvider
+    @State private var key = ""
+    @State private var modelName = ""
+    @State private var checking = false
+    @State private var result: Result<String, AIFailure>?
+
+    private var engine: TranslationEngine { TranslationEngine(provider) }
+
+    var body: some View {
+        if model.hasKey(engine) {
+            HStack(spacing: Theme.space("m")) {
+                DoneLabel(text: String(localized: "Key saved"))
+                Spacer()
+                Button(checking ? LocalizedStringKey("Testing…") : LocalizedStringKey("Test")) {
+                    commitModel()
+                    run { await model.testAIKey(for: provider) }
+                }
+                .buttonStyle(.secondary)
+                .disabled(checking)
+                Button("Remove key") {
+                    model.removeKey(engine)
+                    result = nil
+                }
+                .buttonStyle(.secondary)
+            }
+        } else {
+            HStack(spacing: Theme.space("m")) {
+                SecureField("API key", text: $key).textFieldStyle(.roundedBorder)
+                Button("Save and test") {
+                    commitModel()
+                    let typed = key
+                    run {
+                        let result = await model.setAIKey(typed, for: provider)
+                        if model.hasKey(engine) { key = "" }
+                        return result
+                    }
+                }
+                .buttonStyle(.secondary)
+                .disabled(checking || key.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            if model.settings.translationEngine == engine {
+                HintText(text: "Add your key to start. Until then the free translation is used.")
+            }
+            Link(String(format: String(localized: "Get a %@ API key"), provider.displayName), destination: provider.keyPage)
+                .font(.csCallout)
+        }
+        if let result {
+            switch result {
+            case .success(let sample):
+                Text(String(format: String(localized: "It works. Sample translation: %@"), sample))
+                    .font(.csCallout)
+                    .foregroundStyle(Color.csSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            case .failure(let failure):
+                ErrorText(error: TranslationCard.describe(OnlineKeyState(failure), engine: engine))
+            }
+        }
+        DisclosureGroup("Advanced") {
+            VStack(alignment: .leading, spacing: Theme.space("s")) {
+                TextField("Model", text: $modelName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit(commitModel)
+                HintText(text: "Leave the default unless you want another model of the same service. Faster, cheaper models suit subtitles best.")
+            }
+            .padding(.top, Theme.space("s"))
+        }
+        .font(.csCallout)
+        .onAppear { modelName = provider.model(model.settings.model(for: provider)) }
+        .onDisappear(perform: commitModel)
+    }
+
+    /// Model adı her tuşta değil, Return'de, denemede ve kart kapanınca kaydedilir (her kayıt çeviri hattını yeniden kurar).
+    private func commitModel() {
+        if modelName.trimmingCharacters(in: .whitespaces).isEmpty { modelName = provider.defaultModel }
+        if provider.model(model.settings.model(for: provider)) != modelName.trimmingCharacters(in: .whitespacesAndNewlines) {
+            model.settings.setModel(modelName, for: provider)
+        }
+    }
+
+    private func run(_ work: @escaping () async -> Result<String, AIFailure>) {
+        checking = true
+        result = nil
+        Task {
+            result = await work()
+            checking = false
         }
     }
 }

@@ -4400,6 +4400,438 @@
           }
         }
       }
+    },
+    "Translation": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translation"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çeviri"
+          }
+        }
+      }
+    },
+    "Translation engine": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translation engine"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çeviri motoru"
+          }
+        }
+      }
+    },
+    "Free (on this Mac)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free (on this Mac)"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretsiz (bu Mac'te)"
+          }
+        }
+      }
+    },
+    "Free (on this computer)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free (on this computer)"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretsiz (bu bilgisayarda)"
+          }
+        }
+      }
+    },
+    "Free. Apple's translation runs on this Mac; subtitle text never leaves it.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free. Apple's translation runs on this Mac; subtitle text never leaves it."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretsiz. Apple'ın çevirisi bu Mac'te çalışır; altyazı metni Mac'ten hiç çıkmaz."
+          }
+        }
+      }
+    },
+    "Free. The translation model built into CouchSubs runs on this computer; subtitle text never leaves it.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Free. The translation model built into CouchSubs runs on this computer; subtitle text never leaves it."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretsiz. CouchSubs'ın kendi çeviri modeli bu bilgisayarda çalışır; altyazı metni bilgisayardan hiç çıkmaz."
+          }
+        }
+      }
+    },
+    "Google's AI translates with the game's tone and keeps names as they are. Subtitle text is sent to Google with your own key, and any cost is billed to your Google account. When Gemini cannot be reached, the free translation takes over.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google's AI translates with the game's tone and keeps names as they are. Subtitle text is sent to Google with your own key, and any cost is billed to your Google account. When Gemini cannot be reached, the free translation takes over."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google'ın yapay zekâsı oyunun havasına uygun çevirir, adları olduğu gibi bırakır. Altyazı metni kendi anahtarınızla Google'a gönderilir; ücret çıkarsa Google hesabınıza yansır. Gemini'ye ulaşılamazsa ücretsiz çeviri devreye girer."
+          }
+        }
+      }
+    },
+    "OpenAI's AI translates with the game's tone and keeps names as they are. Subtitle text is sent to OpenAI with your own key, and any cost is billed to your OpenAI account. When OpenAI cannot be reached, the free translation takes over.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI's AI translates with the game's tone and keeps names as they are. Subtitle text is sent to OpenAI with your own key, and any cost is billed to your OpenAI account. When OpenAI cannot be reached, the free translation takes over."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OpenAI'ın yapay zekâsı oyunun havasına uygun çevirir, adları olduğu gibi bırakır. Altyazı metni kendi anahtarınızla OpenAI'a gönderilir; ücret çıkarsa OpenAI hesabınıza yansır. OpenAI'a ulaşılamazsa ücretsiz çeviri devreye girer."
+          }
+        }
+      }
+    },
+    "Anthropic's Claude translates with the game's tone and keeps names as they are. Subtitle text is sent to Anthropic with your own key, and any cost is billed to your Anthropic account. When Claude cannot be reached, the free translation takes over.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anthropic's Claude translates with the game's tone and keeps names as they are. Subtitle text is sent to Anthropic with your own key, and any cost is billed to your Anthropic account. When Claude cannot be reached, the free translation takes over."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anthropic'in Claude'u oyunun havasına uygun çevirir, adları olduğu gibi bırakır. Altyazı metni kendi anahtarınızla Anthropic'e gönderilir; ücret çıkarsa Anthropic hesabınıza yansır. Claude'a ulaşılamazsa ücretsiz çeviri devreye girer."
+          }
+        }
+      }
+    },
+    "Online engines translate English games only. For other game languages the free translation is used.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Online engines translate English games only. For other game languages the free translation is used."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çevrimiçi motorlar yalnız İngilizce oyunları çevirir. Diğer oyun dillerinde ücretsiz çeviri kullanılır."
+          }
+        }
+      }
+    },
+    "It works.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It works."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çalışıyor."
+          }
+        }
+      }
+    },
+    "%@ did not accept this key. Copy it again from your account page.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ did not accept this key. Copy it again from your account page."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ bu anahtarı kabul etmedi. Hesap sayfanızdan yeniden kopyalayın."
+          }
+        }
+      }
+    },
+    "Your %@ account has no credit left or has reached its limit.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your %@ account has no credit left or has reached its limit."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ hesabınızda bakiye kalmadı ya da sınıra ulaşıldı."
+          }
+        }
+      }
+    },
+    "%@ did not accept the model name. Check it under Advanced.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ did not accept the model name. Check it under Advanced."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ model adını kabul etmedi. Gelişmiş bölümünden denetleyin."
+          }
+        }
+      }
+    },
+    "%@ could not be reached. Check your internet connection.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ could not be reached. Check your internet connection."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ hizmetine ulaşılamadı. İnternet bağlantınızı denetleyin."
+          }
+        }
+      }
+    },
+    "Key saved": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Key saved"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anahtar kayıtlı"
+          }
+        }
+      }
+    },
+    "Testing…": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Testing…"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deneniyor…"
+          }
+        }
+      }
+    },
+    "Test": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dene"
+          }
+        }
+      }
+    },
+    "API key": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API key"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "API anahtarı"
+          }
+        }
+      }
+    },
+    "Add your key to start. Until then the free translation is used.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add your key to start. Until then the free translation is used."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Başlamak için anahtarınızı ekleyin. O zamana kadar ücretsiz çeviri kullanılır."
+          }
+        }
+      }
+    },
+    "Get a %@ API key": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get a %@ API key"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ API anahtarı alın"
+          }
+        }
+      }
+    },
+    "It works. Sample translation: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It works. Sample translation: %@"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Çalışıyor. Örnek çeviri: %@"
+          }
+        }
+      }
+    },
+    "Advanced": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Advanced"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gelişmiş"
+          }
+        }
+      }
+    },
+    "Model": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Model"
+          }
+        }
+      }
+    },
+    "Leave the default unless you want another model of the same service. Faster, cheaper models suit subtitles best.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leave the default unless you want another model of the same service. Faster, cheaper models suit subtitles best."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Aynı hizmetin başka bir modelini istemiyorsanız varsayılanı bırakın. Altyazı için hızlı ve ucuz modeller en uygunudur."
+          }
+        }
+      }
+    },
+    "%@ is not translating right now": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ is not translating right now"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ şu an çevirmiyor"
+          }
+        }
+      }
+    },
+    "Meanwhile the free translation is used.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Meanwhile the free translation is used."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu arada ücretsiz çeviri kullanılıyor."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

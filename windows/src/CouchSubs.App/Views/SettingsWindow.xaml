@@ -86,25 +86,50 @@
                     </StackPanel>
                 </c:Card>
 
-                <c:Card Title="{t:T 'Online translation (DeepL)'}" Margin="0,16,0,0">
+                <!-- Çeviri motoru: ücretsiz cihaz üstü model ya da kullanıcının kendi anahtarıyla DeepL, Gemini, OpenAI, Claude (Mac ile aynı düzen) -->
+                <c:Card Title="{t:T 'Translation'}" Margin="0,16,0,0">
                     <StackPanel>
-                        <TextBlock Style="{StaticResource HintText}" Margin="0,0,0,12"
-                                   Text="{t:T 'Optional. With your own free DeepL key, translations read more naturally. Subtitle text is sent to DeepL; when DeepL cannot be reached, the translation model on this computer takes over.'}" />
-                        <StackPanel x:Name="DeepLNewKey">
-                            <StackPanel Orientation="Horizontal">
-                                <PasswordBox x:Name="DeepLKey" Width="320" VerticalContentAlignment="Center" />
-                                <Button x:Name="DeepLSave" Content="{t:T 'Save and test'}" Margin="12,0,0,0" Click="OnDeepLSave" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <TextBlock Text="{t:T 'Translation engine'}" VerticalAlignment="Center" Margin="0,0,16,0" />
+                            <ComboBox x:Name="Engine" SelectionChanged="OnEngine" MinWidth="240">
+                                <ComboBoxItem Content="{t:T 'Free (on this computer)'}" Tag="Free" />
+                                <ComboBoxItem Content="DeepL" Tag="DeepL" />
+                                <ComboBoxItem Content="Google Gemini" Tag="Gemini" />
+                                <ComboBoxItem Content="OpenAI" Tag="OpenAi" />
+                                <ComboBoxItem Content="Anthropic Claude" Tag="Claude" />
+                            </ComboBox>
+                        </StackPanel>
+                        <TextBlock x:Name="EngineHint" Style="{StaticResource HintText}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="EnglishOnlyHint" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"
+                                   Text="{t:T 'Online engines translate English games only. For other game languages the free translation is used.'}" />
+                        <StackPanel x:Name="KeyPanel" Margin="0,12,0,0">
+                            <StackPanel x:Name="NewKey">
+                                <StackPanel Orientation="Horizontal">
+                                    <PasswordBox x:Name="KeyBox" Width="320" VerticalContentAlignment="Center" />
+                                    <Button x:Name="KeySave" Content="{t:T 'Save and test'}" Margin="12,0,0,0" Click="OnKeySave" />
+                                </StackPanel>
+                                <TextBlock x:Name="NoKeyHint" Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                           Text="{t:T 'Add your key to start. Until then the free translation is used.'}" />
+                                <TextBlock Margin="0,8,0,0">
+                                    <Hyperlink x:Name="KeyLink" RequestNavigate="OnLink"><Run x:Name="KeyLinkText" /></Hyperlink>
+                                </TextBlock>
                             </StackPanel>
-                            <TextBlock Margin="0,8,0,0">
-                                <Hyperlink NavigateUri="https://www.deepl.com/pro-api" RequestNavigate="OnLink"><Run Text="{t:T 'Get a free DeepL API key'}" /></Hyperlink>
-                            </TextBlock>
+                            <DockPanel x:Name="SavedKey" LastChildFill="False">
+                                <TextBlock Text="{t:T 'Key saved'}" Style="{StaticResource DoneText}" VerticalAlignment="Center" />
+                                <Button DockPanel.Dock="Right" Content="{t:T 'Remove key'}" Margin="8,0,0,0" Click="OnKeyRemove" />
+                                <Button x:Name="KeyTest" DockPanel.Dock="Right" Content="{t:T 'Test'}" Click="OnKeyTest" />
+                            </DockPanel>
+                            <TextBlock x:Name="KeyStatus" Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+                            <TextBlock x:Name="KeyError" Style="{StaticResource ErrorText}" Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+                            <Expander x:Name="Advanced" Header="{t:T 'Advanced'}" Margin="0,12,0,0" Foreground="{DynamicResource textSecondaryBrush}">
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="{t:T 'Model'}" Style="{StaticResource HintText}" Margin="0,0,0,4" />
+                                    <TextBox x:Name="ModelBox" Width="320" HorizontalAlignment="Left" LostFocus="OnModelCommit" KeyDown="OnModelKey" />
+                                    <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                                               Text="{t:T 'Leave the default unless you want another model of the same service. Faster, cheaper models suit subtitles best.'}" />
+                                </StackPanel>
+                            </Expander>
                         </StackPanel>
-                        <StackPanel x:Name="DeepLSaved">
-                            <CheckBox x:Name="DeepLOn" Content="{t:T 'Translate with DeepL'}" Foreground="{DynamicResource textPrimaryBrush}"
-                                      Checked="OnDeepLToggle" Unchecked="OnDeepLToggle" />
-                            <Button Content="{t:T 'Remove key'}" HorizontalAlignment="Left" Margin="0,12,0,0" Click="OnDeepLRemove" />
-                        </StackPanel>
-                        <TextBlock x:Name="DeepLStatus" Style="{StaticResource HintText}" Margin="0,8,0,0" Visibility="Collapsed" />
                     </StackPanel>
                 </c:Card>
 

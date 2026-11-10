@@ -29,8 +29,11 @@ public sealed class TranslatorException(TranslatorStatus status)
     public TranslatorStatus Status { get; } = status;
 }
 
-/// <summary>Çevrimiçi çeviri anahtarı (DeepL) denendiğinde ne çıktı.</summary>
-public enum OnlineKeyState { Valid, Invalid, QuotaExceeded, Unreachable }
+/// <summary>
+/// Çevrimiçi çeviri anahtarı (DeepL ya da yapay zekâ hizmeti) denendiğinde ne çıktı. <c>ModelRejected</c>: hizmet model
+/// adını kabul etmedi (yalnız yapay zekâ hizmetlerinde).
+/// </summary>
+public enum OnlineKeyState { Valid, Invalid, QuotaExceeded, Unreachable, ModelRejected }
 
 /// <param name="Used">Bu ay kullanılan karakter (geçerli anahtarda).</param>
 /// <param name="Limit">Aylık sınır.</param>

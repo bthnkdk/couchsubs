@@ -46,60 +46,153 @@ public partial class SettingsWindow : Window
         controller.SnapshotRequested += OnSnapshot;
         Closed += (_, _) => controller.SnapshotRequested -= OnSnapshot;
         Dubbing.Attach(controller);
-        ShowDeepL();
-        if (controller.HasDeepLKey) _ = ShowDeepLUsageAsync();
+        Engine.SelectedItem = Engine.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Engine.ToString());
+        ShowEngine();
         loading = false;
+        Closed += (_, _) => CommitModel();
     }
 
-    private void ShowDeepL()
+    /// <summary>Seçili motor (ayarlarda ücretsiz ise Free).</summary>
+    private TranslationEngine SelectedEngine =>
+        Engine.SelectedItem is ComboBoxItem { Tag: string tag } ? Enum.Parse<TranslationEngine>(tag) : TranslationEngine.Free;
+
+    private void ShowEngine()
     {
-        var saved = controller.HasDeepLKey;
-        DeepLNewKey.Visibility = saved ? Visibility.Collapsed : Visibility.Visible;
-        DeepLSaved.Visibility = saved ? Visibility.Visible : Visibility.Collapsed;
-        var wasLoading = loading;
-        loading = true;
-        DeepLOn.IsChecked = controller.Settings.OnlineTranslation;
-        loading = wasLoading;
+        var text = Localizer.Current;
+        var engine = SelectedEngine;
+        EngineHint.Text = text[engine switch
+        {
+            TranslationEngine.Free => "Free. The translation model built into CouchSubs runs on this computer; subtitle text never leaves it.",
+            TranslationEngine.DeepL => "Optional. With your own free DeepL key, translations read more naturally. Subtitle text is sent to DeepL; when DeepL cannot be reached, the translation model on this computer takes over.",
+            TranslationEngine.Gemini => "Google's AI translates with the game's tone and keeps names as they are. Subtitle text is sent to Google with your own key, and any cost is billed to your Google account. When Gemini cannot be reached, the free translation takes over.",
+            TranslationEngine.OpenAi => "OpenAI's AI translates with the game's tone and keeps names as they are. Subtitle text is sent to OpenAI with your own key, and any cost is billed to your OpenAI account. When OpenAI cannot be reached, the free translation takes over.",
+            _ => "Anthropic's Claude translates with the game's tone and keeps names as they are. Subtitle text is sent to Anthropic with your own key, and any cost is billed to your Anthropic account. When Claude cannot be reached, the free translation takes over.",
+        }];
+        EnglishOnlyHint.Visibility = engine != TranslationEngine.Free && controller.Settings.SourceLanguage != "en" ? Visibility.Visible : Visibility.Collapsed;
+        KeyPanel.Visibility = engine == TranslationEngine.Free ? Visibility.Collapsed : Visibility.Visible;
+        KeyStatus.Visibility = Visibility.Collapsed;
+        KeyError.Visibility = Visibility.Collapsed;
+        if (engine == TranslationEngine.Free) return;
+
+        var saved = controller.HasKey(engine);
+        NewKey.Visibility = saved ? Visibility.Collapsed : Visibility.Visible;
+        SavedKey.Visibility = saved ? Visibility.Visible : Visibility.Collapsed;
+        // DeepL'in denemesi bu ayki kullanımı gösterir; ayrı bir "Dene" düğmesi gerekmez.
+        KeyTest.Visibility = engine == TranslationEngine.DeepL ? Visibility.Collapsed : Visibility.Visible;
+        NoKeyHint.Visibility = engine == TranslationEngine.DeepL ? Visibility.Collapsed : Visibility.Visible;
+        var provider = engine.Provider();
+        KeyLink.NavigateUri = provider?.KeyPage() ?? new Uri("https://www.deepl.com/pro-api");
+        KeyLinkText.Text = provider is { } named ? text.Format("Get a %@ API key", named.DisplayName()) : text["Get a free DeepL API key"];
+        Advanced.Visibility = provider is null ? Visibility.Collapsed : Visibility.Visible;
+        if (provider is { } p) ModelBox.Text = p.Model(controller.Settings.ModelFor(p));
+        if (saved && engine == TranslationEngine.DeepL) _ = ShowDeepLUsageAsync();
+    }
+
+    private void ShowStatus(string message, bool error)
+    {
+        KeyStatus.Visibility = error ? Visibility.Collapsed : Visibility.Visible;
+        KeyError.Visibility = error ? Visibility.Visible : Visibility.Collapsed;
+        (error ? KeyError : KeyStatus).Text = message;
     }
 
     private void ShowDeepLStatus(OnlineKeyCheck check)
     {
-        DeepLStatus.Visibility = Visibility.Visible;
-        DeepLStatus.Text = check.State switch
+        var text = Localizer.Current;
+        ShowStatus(check.State switch
         {
-            OnlineKeyState.Valid => Localizer.Current.Format("This month: %1$@ of %2$@ characters used.",
-                check.Used.ToString("N0"), check.Limit.ToString("N0")),
-            OnlineKeyState.QuotaExceeded => Localizer.Current["This month's DeepL limit is used up. Until it renews, the translation model on this computer translates."],
-            OnlineKeyState.Invalid => Localizer.Current["DeepL did not accept this key. Copy it again from your DeepL account page."],
-            _ => Localizer.Current["DeepL could not be reached. Check your internet connection."],
-        };
+            OnlineKeyState.Valid => text.Format("This month: %1$@ of %2$@ characters used.", check.Used.ToString("N0"), check.Limit.ToString("N0")),
+            OnlineKeyState.QuotaExceeded => text["This month's DeepL limit is used up. Until it renews, the translation model on this computer translates."],
+            OnlineKeyState.Invalid => text["DeepL did not accept this key. Copy it again from your DeepL account page."],
+            _ => text["DeepL could not be reached. Check your internet connection."],
+        }, check.State is not (OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded));
+    }
+
+    private void ShowAiResult(AiTestResult result, TranslationEngine engine)
+    {
+        if (result.State == OnlineKeyState.Valid)
+            ShowStatus(Localizer.Current.Format("It works. Sample translation: %@", result.Sample ?? ""), false);
+        else
+            ShowStatus(result.State.Describe(engine, Localizer.Current), true);
     }
 
     private async Task ShowDeepLUsageAsync() => ShowDeepLStatus(await controller.CheckDeepLKeyAsync());
 
-    private async void OnDeepLSave(object sender, RoutedEventArgs e)
+    private void OnEngine(object sender, SelectionChangedEventArgs e)
     {
-        DeepLSave.IsEnabled = false;
+        if (loading) return;
+        CommitModel();
+        Update(s => s.WithEngine(SelectedEngine));
+        ShowEngine();
+    }
+
+    private async void OnKeySave(object sender, RoutedEventArgs e)
+    {
+        var engine = SelectedEngine;
+        KeySave.IsEnabled = false;
         try
         {
-            var check = await controller.SetDeepLKeyAsync(DeepLKey.Password);
-            ShowDeepLStatus(check);
-            if (controller.HasDeepLKey) DeepLKey.Clear();
-            ShowDeepL();
+            CommitModel();
+            if (engine.Provider() is { } provider)
+            {
+                var result = await controller.SetAiKeyAsync(provider, KeyBox.Password);
+                var saved = controller.HasKey(engine);
+                if (saved) KeyBox.Clear();
+                ShowEngine();
+                ShowAiResult(result, engine);
+            }
+            else
+            {
+                var check = await controller.SetDeepLKeyAsync(KeyBox.Password);
+                if (controller.HasDeepLKey) KeyBox.Clear();
+                ShowEngine();
+                ShowDeepLStatus(check);
+            }
         }
         finally
         {
-            DeepLSave.IsEnabled = true;
+            KeySave.IsEnabled = true;
         }
     }
 
-    private void OnDeepLToggle(object sender, RoutedEventArgs e) => Update(s => s with { OnlineTranslation = DeepLOn.IsChecked == true });
-
-    private void OnDeepLRemove(object sender, RoutedEventArgs e)
+    private async void OnKeyTest(object sender, RoutedEventArgs e)
     {
-        controller.RemoveDeepLKey();
-        DeepLStatus.Visibility = Visibility.Collapsed;
-        ShowDeepL();
+        var engine = SelectedEngine;
+        if (engine.Provider() is not { } provider) return;
+        KeyTest.IsEnabled = false;
+        KeyTest.Content = Localizer.Current["Testing…"];
+        try
+        {
+            CommitModel();
+            ShowAiResult(await controller.TestAiKeyAsync(provider), engine);
+        }
+        finally
+        {
+            KeyTest.IsEnabled = true;
+            KeyTest.Content = Localizer.Current["Test"];
+        }
+    }
+
+    private void OnKeyRemove(object sender, RoutedEventArgs e)
+    {
+        var engine = SelectedEngine;
+        controller.RemoveKey(engine);
+        ShowEngine();
+    }
+
+    /// <summary>Model adı her tuşta değil, Enter'da, odak çıkınca ve denemede kaydedilir (her kayıt çeviri hattını yeniden kurar).</summary>
+    private void CommitModel()
+    {
+        if (SelectedEngine.Provider() is not { } provider) return;
+        if (string.IsNullOrWhiteSpace(ModelBox.Text)) ModelBox.Text = provider.DefaultModel();
+        if (provider.Model(controller.Settings.ModelFor(provider)) != ModelBox.Text.Trim())
+            Update(s => s.WithModel(provider, ModelBox.Text));
+    }
+
+    private void OnModelCommit(object sender, RoutedEventArgs e) => CommitModel();
+
+    private void OnModelKey(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        if (e.Key == System.Windows.Input.Key.Enter) CommitModel();
     }
 
     private void OnLink(object sender, RequestNavigateEventArgs e) =>

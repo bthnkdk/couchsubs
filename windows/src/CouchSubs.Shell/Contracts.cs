@@ -19,6 +19,62 @@ public static class StoreKeys
     public const string DevSessionRenewed = "devSessionRenewed";
     /// <summary>Kullanıcının DeepL anahtarı (isteğe bağlı çevrimiçi çeviri).</summary>
     public const string DeepLKey = "deepLKey";
+    /// <summary>Kullanıcının yapay zekâ anahtarları (isteğe bağlı çevrimiçi çeviri).</summary>
+    public const string GeminiKey = "geminiKey";
+    public const string OpenAiKey = "openAIKey";
+    public const string ClaudeKey = "claudeKey";
+}
+
+/// <summary>
+/// Ayarlardaki çeviri motoru seçimi. Ücretsiz olan cihaz üstü modeldir; diğerleri kullanıcının kendi anahtarıyla çalışır
+/// (Mac'teki TranslationEngine ile aynı).
+/// </summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<TranslationEngine>))]
+public enum TranslationEngine { Free, DeepL, Gemini, OpenAi, Claude }
+
+public static class TranslationEngines
+{
+    public static AiProvider? Provider(this TranslationEngine engine) => engine switch
+    {
+        TranslationEngine.Gemini => AiProvider.Gemini,
+        TranslationEngine.OpenAi => AiProvider.OpenAi,
+        TranslationEngine.Claude => AiProvider.Claude,
+        _ => null,
+    };
+
+    public static TranslationEngine Engine(this AiProvider provider) => provider switch
+    {
+        AiProvider.Gemini => TranslationEngine.Gemini,
+        AiProvider.OpenAi => TranslationEngine.OpenAi,
+        _ => TranslationEngine.Claude,
+    };
+
+    /// <summary>Hizmetin adı (marka adı; çevrilmez).</summary>
+    public static string DisplayName(this TranslationEngine engine) => engine.Provider()?.DisplayName() ?? "DeepL";
+
+    /// <summary>Çevrimiçi motor hatasının kullanıcıya söylenişi (ayarlar ve ana ekran aynı metni kullanır; Mac ile aynı).</summary>
+    public static string Describe(this OnlineKeyState state, TranslationEngine engine, Localizer text)
+    {
+        var name = engine.DisplayName();
+        return state switch
+        {
+            OnlineKeyState.Valid => text["It works."],
+            OnlineKeyState.Invalid => text.Format("%@ did not accept this key. Copy it again from your account page.", name),
+            OnlineKeyState.QuotaExceeded => text.Format("Your %@ account has no credit left or has reached its limit.", name),
+            OnlineKeyState.ModelRejected => text.Format("%@ did not accept the model name. Check it under Advanced.", name),
+            _ => text.Format("%@ could not be reached. Check your internet connection.", name),
+        };
+    }
+
+    /// <summary>Şifreli depodaki anahtar adı; ücretsiz motorda null.</summary>
+    public static string? StoreKey(this TranslationEngine engine) => engine switch
+    {
+        TranslationEngine.DeepL => StoreKeys.DeepLKey,
+        TranslationEngine.Gemini => StoreKeys.GeminiKey,
+        TranslationEngine.OpenAi => StoreKeys.OpenAiKey,
+        TranslationEngine.Claude => StoreKeys.ClaudeKey,
+        _ => null,
+    };
 }
 
 /// <summary>Kalıcı ayarlar (şifreli depo değil, sıradan ayar dosyası).</summary>
@@ -41,8 +97,45 @@ public sealed record UserSettings
     public string SourceLanguage { get; init; } = "en";
     public string TargetLanguage { get; init; } = "tr";
     public DubbingSettings Dubbing { get; init; } = new();
-    /// <summary>Anahtar girildiyse çeviri DeepL'le yapılır; kapalıysa ya da DeepL'e ulaşılamazsa cihaz üstü model.</summary>
+    /// <summary>
+    /// Açıksa çeviri <see cref="OnlineEngine"/> ile yapılır (anahtarı kayıtlıysa); kapalıysa ya da hizmete ulaşılamazsa
+    /// cihaz üstü model. Eski sürümlerde yalnız DeepL vardı; o kayıtlar DeepL ile açılır.
+    /// </summary>
     public bool OnlineTranslation { get; init; }
+    /// <summary>Seçili çevrimiçi motor (hiçbir zaman Free değildir).</summary>
+    public TranslationEngine OnlineEngine { get; init; } = TranslationEngine.DeepL;
+    /// <summary>Yapay zekâ modelleri; boşsa hizmetin varsayılan modeli.</summary>
+    public string GeminiModel { get; init; } = "";
+    public string OpenAiModel { get; init; } = "";
+    public string ClaudeModel { get; init; } = "";
+
+    /// <summary>Ayarlarda seçili motor: çevrimiçi çeviri kapalıysa ücretsiz olan.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public TranslationEngine Engine => OnlineTranslation && OnlineEngine != TranslationEngine.Free ? OnlineEngine : TranslationEngine.Free;
+
+    public UserSettings WithEngine(TranslationEngine engine) => engine == TranslationEngine.Free
+        ? this with { OnlineTranslation = false }
+        : this with { OnlineTranslation = true, OnlineEngine = engine };
+
+    /// <summary>Yapay zekâ hizmetinin kayıtlı model adı (boşsa varsayılan kullanılır).</summary>
+    public string ModelFor(AiProvider provider) => provider switch
+    {
+        AiProvider.Gemini => GeminiModel,
+        AiProvider.OpenAi => OpenAiModel,
+        _ => ClaudeModel,
+    };
+
+    /// <summary>Varsayılanla aynı model boş kalır: ileride varsayılan değişirse kullanıcı da yeni modele geçer.</summary>
+    public UserSettings WithModel(AiProvider provider, string model)
+    {
+        var value = model.Trim() == provider.DefaultModel() ? "" : model.Trim();
+        return provider switch
+        {
+            AiProvider.Gemini => this with { GeminiModel = value },
+            AiProvider.OpenAi => this with { OpenAiModel = value },
+            _ => this with { ClaudeModel = value },
+        };
+    }
 
     /// <summary>Ek bölgenin sayısı; <see cref="ExtraRegion"/> 1..ExtraRegionCount arasında çalışır.</summary>
     public const int ExtraRegionCount = 3;
@@ -152,6 +245,10 @@ public interface IAppServices
     /// <summary>DeepL çevirmeni; <paramref name="fallback"/> DeepL'e ulaşılamayan satırları çevirir. Bu derlemede yoksa null.</summary>
     ITextTranslator? MakeOnlineTranslator(string key, ITextTranslator? fallback) => null;
     Task<OnlineKeyCheck> CheckOnlineKeyAsync(string key) => Task.FromResult(new OnlineKeyCheck(OnlineKeyState.Unreachable));
+    /// <summary>Yapay zekâ çevirmeni; <paramref name="fallback"/> hizmete ulaşılamayan satırları çevirir. Bu derlemede yoksa null.</summary>
+    ITextTranslator? MakeAiTranslator(AiProvider provider, string key, string model, ITextTranslator? fallback) => null;
+    /// <summary>Yapay zekâ anahtarını örnek bir satırı çevirerek dener.</summary>
+    Task<AiTestResult> TestAiKeyAsync(AiProvider provider, string key, string model) => Task.FromResult(new AiTestResult(OnlineKeyState.Unreachable));
     /// <summary>Türkçe dublaj modeli; bu derlemede yoksa null.</summary>
     IDubbingModel? Dubbing => null;
     /// <summary>Hızlı dublaj: sistemin kendi Türkçe sesi (Windows'ta Microsoft Tolga); yoksa null.</summary>

@@ -47,6 +47,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private string lastSource = "";
     private string lastTranslation = "";
     private TranslatorStatus translatorStatus = TranslatorStatus.Ready;
+    private OnlineKeyState? onlineIssue;
     private bool ocrMissing;
     private Frame? lastFrame;
     private bool modelDownloading;
@@ -121,6 +122,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public string LastSource { get => lastSource; private set => Set(ref lastSource, value); }
     public string LastTranslation { get => lastTranslation; private set => Set(ref lastTranslation, value); }
     public TranslatorStatus TranslatorStatus { get => translatorStatus; private set => Set(ref translatorStatus, value); }
+    /// <summary>Çevrimiçi çeviri (DeepL ya da yapay zekâ) şu an çeviremiyor; o satırlar cihaz üstü modelle çevriliyor.</summary>
+    public OnlineKeyState? OnlineIssue { get => onlineIssue; private set => Set(ref onlineIssue, value); }
     /// <summary>Bilgisayarda yazı tanıma dili yok; ayarlardan eklenmesi gerekir.</summary>
     public bool OcrMissing { get => ocrMissing; private set => Set(ref ocrMissing, value); }
     /// <summary>Canlı altyazı çevirisi duraklatıldı (Num 0); ek bölge ve serbest alan çevirileri çalışmaya devam eder.</summary>
@@ -148,8 +151,11 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             settingsStore.Save(value);
             server.SendStyle(value.Style);
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
-            if (isRunning && (old.SourceLanguage != value.SourceLanguage || old.TargetLanguage != value.TargetLanguage
-                              || old.OnlineTranslation != value.OnlineTranslation))
+            var translationChanged = old.OnlineTranslation != value.OnlineTranslation || old.OnlineEngine != value.OnlineEngine
+                                     || old.GeminiModel != value.GeminiModel || old.OpenAiModel != value.OpenAiModel
+                                     || old.ClaudeModel != value.ClaudeModel;
+            if (translationChanged && !isRunning) RefreshTranslatorStatus();
+            if (isRunning && (old.SourceLanguage != value.SourceLanguage || old.TargetLanguage != value.TargetLanguage || translationChanged))
             {
                 RefreshTranslatorStatus();
                 MakePipeline();
@@ -790,6 +796,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         screenShownUntil = default;
         SubtitlesPaused = false;
         ActiveSourceLanguage = null;
+        OnlineIssue = null;
         StopDubber();
         if (isRunning) sleep.End();
         IsRunning = false;
@@ -864,16 +871,24 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         // Model bu arada inmiş olabilir; her çeviri sonucu durumu günceller.
         built.TranslationResult += error => post(() => TranslatorStatus = error ?? TranslatorStatus.Ready);
         built.SpeechReady += lines => post(() => Speak(lines));
+        OnlineIssue = null;
         pipeline = built;
     }
 
     private ITextTranslator MakeTranslator()
     {
         var local = MakeLocalTranslator();
-        if (OnlineTranslationActive && store.Load<string>(StoreKeys.DeepLKey) is { } key &&
-            services.MakeOnlineTranslator(key, local is UnavailableTranslator ? null : local) is { } online)
-            return online;
-        return local;
+        var fallback = local is UnavailableTranslator ? null : local;
+        var engine = settings.OnlineEngine;
+        if (!OnlineTranslationActive || engine.StoreKey() is not { } storeKey || store.Load<string>(storeKey) is not { Length: > 0 } key)
+            return local;
+        var online = engine.Provider() is { } provider
+            ? services.MakeAiTranslator(provider, key, provider.Model(settings.ModelFor(provider)), fallback)
+            : services.MakeOnlineTranslator(key, fallback);
+        if (online is null) return local;
+        // Hizmet çeviremeyince ana ekranda uyarı çıkar; düzelince kalkar.
+        if (online is IOnlineTranslator reporting) reporting.FailureChanged += state => post(() => OnlineIssue = state);
+        return online;
     }
 
     private ITextTranslator MakeLocalTranslator()
@@ -884,26 +899,22 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         return translation.IsInstalled(source, target) ? translation.Create(source, target) : new UnavailableTranslator(TranslatorStatus.NeedsDownload);
     }
 
-    /// <summary>DeepL yalnız İngilizce→Türkçe için açılır (ayar ekranındaki dil seçenekleri de bunlar).</summary>
-    private bool OnlineTranslationActive =>
-        settings.OnlineTranslation && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && HasDeepLKey;
+    /// <summary>Çevrimiçi çeviri yalnız İngilizce→Türkçe için ve seçili motorun anahtarı kayıtlıysa açılır.</summary>
+    public bool OnlineTranslationActive =>
+        settings.OnlineTranslation && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && HasKey(settings.OnlineEngine);
 
-    /// <summary>Kayıtlı bir DeepL anahtarı var mı (anahtarın kendisi arayüze hiç dönmez).</summary>
-    public bool HasDeepLKey => store.Load<string>(StoreKeys.DeepLKey) is { Length: > 0 };
+    /// <summary>Bu motorun anahtarı kayıtlı mı (anahtarın kendisi arayüze hiç dönmez).</summary>
+    public bool HasKey(TranslationEngine engine) => engine.StoreKey() is { } storeKey && store.Load<string>(storeKey) is { Length: > 0 };
 
-    /// <summary>Anahtar denenir; geçerliyse (kotası bitmiş olsa da) şifreli depoya yazılır ve çevrimiçi çeviri açılır.</summary>
+    /// <summary>Kayıtlı bir DeepL anahtarı var mı.</summary>
+    public bool HasDeepLKey => HasKey(TranslationEngine.DeepL);
+
+    /// <summary>Anahtar denenir; geçerliyse (kotası bitmiş olsa da) şifreli depoya yazılır ve DeepL seçilir.</summary>
     public async Task<OnlineKeyCheck> SetDeepLKeyAsync(string key)
     {
         key = key.Trim();
         var check = await services.CheckOnlineKeyAsync(key);
-        if (check.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded)
-        {
-            store.Save(StoreKeys.DeepLKey, key);
-            Changed(nameof(HasDeepLKey));
-            if (settings.OnlineTranslation && isRunning) MakePipeline();
-            else Settings = settings with { OnlineTranslation = true };
-            RefreshTranslatorStatus();
-        }
+        if (check.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded) SaveKey(TranslationEngine.DeepL, key);
         return check;
     }
 
@@ -912,11 +923,44 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         store.Load<string>(StoreKeys.DeepLKey) is { Length: > 0 } key ? services.CheckOnlineKeyAsync(key)
             : Task.FromResult(new OnlineKeyCheck(OnlineKeyState.Invalid));
 
-    public void RemoveDeepLKey()
+    public void RemoveDeepLKey() => RemoveKey(TranslationEngine.DeepL);
+
+    /// <summary>
+    /// Yapay zekâ anahtarı örnek bir satırla denenir. Anahtar kabul edildiyse (bakiye bitmiş ya da model adı yanlış olsa
+    /// da) şifreli depoya yazılır ve bu motor seçilir.
+    /// </summary>
+    public async Task<AiTestResult> SetAiKeyAsync(AiProvider provider, string key)
     {
-        store.Remove(StoreKeys.DeepLKey);
+        key = key.Trim();
+        var result = await services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)));
+        if (result.State is OnlineKeyState.Valid or OnlineKeyState.QuotaExceeded or OnlineKeyState.ModelRejected)
+            SaveKey(provider.Engine(), key);
+        return result;
+    }
+
+    /// <summary>Kayıtlı anahtar ve modelle örnek satırı çevirir (ayarlardaki "Dene").</summary>
+    public Task<AiTestResult> TestAiKeyAsync(AiProvider provider) =>
+        provider.Engine().StoreKey() is { } storeKey && store.Load<string>(storeKey) is { Length: > 0 } key
+            ? services.TestAiKeyAsync(provider, key, provider.Model(settings.ModelFor(provider)))
+            : Task.FromResult(new AiTestResult(OnlineKeyState.Invalid));
+
+    public void RemoveKey(TranslationEngine engine)
+    {
+        if (engine.StoreKey() is not { } storeKey) return;
+        store.Remove(storeKey);
         Changed(nameof(HasDeepLKey));
-        Settings = settings with { OnlineTranslation = false };
+        if (settings.Engine == engine) Settings = settings.WithEngine(TranslationEngine.Free);
+        RefreshTranslatorStatus();
+    }
+
+    private void SaveKey(TranslationEngine engine, string key)
+    {
+        if (engine.StoreKey() is not { } storeKey) return;
+        store.Save(storeKey, key);
+        Changed(nameof(HasDeepLKey));
+        // Motor zaten seçiliydi, anahtar yeni geldi: hat yeni anahtarla kurulsun.
+        if (settings.Engine == engine && isRunning) MakePipeline();
+        else Settings = settings.WithEngine(engine);
         RefreshTranslatorStatus();
     }
 
