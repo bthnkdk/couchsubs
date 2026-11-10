@@ -67,4 +67,21 @@ public class TokenizerTests
     {
         Assert.Equal(57060, Tokenizer.Value.VocabularySize);
     }
+    /// <summary>
+    /// Kısa satır ayracı ve terim yer tutucuları model sözlüğünde bilinmeyen parçaya düşmemeli: bilinmeyen parça
+    /// modelden geri gelmez. "|", "||", "[[" sözlükte yok; "▁***" tek parça.
+    /// </summary>
+    [TokenizerTheory]
+    [InlineData("Where is your mother? *** Not you.")]
+    [InlineData("Zarmon, take the Velkor to Dorvan.")]
+    [InlineData("Kelmar, Tolvar, Brandur, Halvor and Feldor.")]
+    public void SeparatorAndPlaceholdersAreKnownPieces(string text)
+    {
+        var ids = Tokenizer.Value.Encode(text);
+        Assert.DoesNotContain(MarianTokenizer.UnkId, ids);
+        Assert.Equal(text, Tokenizer.Value.Decode(ids));
+    }
+
+    [TokenizerFact]
+    public void PipeWouldBeLost() => Assert.Contains(MarianTokenizer.UnkId, Tokenizer.Value.Encode("Where? | Not you."));
 }

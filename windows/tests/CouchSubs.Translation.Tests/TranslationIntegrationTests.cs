@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 using System.Diagnostics;
+using CouchSubs.Core;
 using Xunit.Abstractions;
 
 namespace CouchSubs.Translation.Tests;
@@ -93,6 +94,33 @@ public sealed class TranslationIntegrationTests(LoadedTranslator loaded, ITestOu
         Assert.InRange(median, 0, 1000);
     }
 
+    /// <summary>Terim yer tutucusu ve kısa satır ayracı gerçek modelden geçer (model yoksa atlanır).</summary>
+    [ModelFact]
+    public async Task GlossaryTermsAndShortLineContextSurviveTheModel()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "couchsubs-glossary-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "gow.json"),
+                """{ "terms": { "Leviathan Axe": "Leviathan Baltası" }, "keep": ["Kratos", "Atreus"] }""");
+            using var translator = new MarianTranslator(TestModels.Directory, glossary: new GlossaryStore(directory));
+            var axe = await translator.TranslateAsync("Kratos, throw the Leviathan Axe!");
+            output.WriteLine(axe);
+            Assert.Contains("Leviathan Baltası", axe);
+            Assert.Contains("Kratos", axe);
+            await translator.TranslateAsync("Where is your mother, Atreus?");
+            var shortLine = await translator.TranslateAsync("Not you.");
+            output.WriteLine(shortLine);
+            Assert.DoesNotContain("*", shortLine);
+            Assert.DoesNotContain("Zarmon", shortLine);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     [ModelFact]
     public async Task CachedLineReturnsImmediately()
     {
@@ -106,7 +134,9 @@ public sealed class TranslationIntegrationTests(LoadedTranslator loaded, ITestOu
     [ModelFact]
     public async Task ConcurrentCallsMatchSequentialResults()
     {
-        string[] lines = ["Run, now!", "Where is the boat?", "Follow me, brother.", "This is not over.", "Hold the line!", "Over here, quickly!"];
+        // Dört sözcük ve üstü: kısa satır önceki satırla çevrilir, paralel sırada bağlamı değişirdi.
+        string[] lines = ["Run, now, run now!", "Where is the boat?", "Follow me now, brother.", "This is not over.",
+            "Hold the line, everyone!", "Over here, quickly, come!"];
         var parallel = await Task.WhenAll(lines.Select(l => Task.Run(() => Translator.TranslateAsync(l))));
 
         using var fresh = new MarianTranslator(TestModels.Directory);

@@ -1,0 +1,16 @@
+{
+  "game": "Genel",
+  "terms": {
+    "health potion": "can iksiri",
+    "skill tree": "yetenek ağacı",
+    "fast travel": "hızlı seyahat",
+    "side quest": "yan görev",
+    "main quest": "ana görev",
+    "quest log": "görev günlüğü",
+    "experience points": "deneyim puanı",
+    "checkpoint": "kontrol noktası",
+    "save point": "kayıt noktası",
+    "cooldown": "bekleme süresi"
+  },
+  "keep": []
+}

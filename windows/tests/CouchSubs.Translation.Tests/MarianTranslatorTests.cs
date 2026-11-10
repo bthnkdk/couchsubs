@@ -16,6 +16,8 @@ public class MarianTranslatorTests
         public int Delay { get; init; }
         /// <summary>Verilirse çeviri, test bunu açana kadar bekler (zamanlamaya bağlı olmayan testler için).</summary>
         public ManualResetEventSlim? Hold { get; init; }
+        /// <summary>Verilirse çeviri budur; yoksa cümle büyük harfe çevrilir.</summary>
+        public Func<string, string>? Map { get; init; }
 
         public string Translate(string sentence, CancellationToken cancellationToken)
         {
@@ -25,7 +27,7 @@ public class MarianTranslatorTests
                 Hold?.Wait();
                 if (Delay > 0) Thread.Sleep(Delay);
                 lock (Calls) Calls.Add(sentence);
-                return sentence.ToUpperInvariant();
+                return Map?.Invoke(sentence) ?? sentence.ToUpperInvariant();
             }
             finally
             {
@@ -73,9 +75,10 @@ public class MarianTranslatorTests
     {
         var (translator, engine) = Create();
 
-        await translator.TranslateAsync("Boy! Focus.");
-        Assert.Equal("BOY! FOCUS. WE GO.", await translator.TranslateAsync("Boy! Focus. We go."));
-        Assert.Equal(["Boy!", "Focus.", "We go."], engine.Calls);
+        await translator.TranslateAsync("We go to the mountain now. Stay behind me, boy.");
+        Assert.Equal("WE GO TO THE MOUNTAIN NOW. STAY BEHIND ME, BOY. KEEP YOUR EYES OPEN.",
+            await translator.TranslateAsync("We go to the mountain now. Stay behind me, boy. Keep your eyes open."));
+        Assert.Equal(["We go to the mountain now.", "Stay behind me, boy.", "Keep your eyes open."], engine.Calls);
     }
 
     [Fact]
@@ -85,7 +88,8 @@ public class MarianTranslatorTests
 
         Assert.Equal("ATREUS: FATHER, LOOK!\nKRATOS: STAY.", await translator.TranslateAsync("ATREUS: Father, look!\nKRATOS: Stay."));
         Assert.Equal("...", await translator.TranslateAsync("..."));
-        Assert.Equal(["Father, look!", "Stay."], engine.Calls);
+        // "Stay." kısa: aynı satırdaki önceki cümleyle birlikte çevrilir.
+        Assert.Equal(["Father, look!", "Father, look! *** Stay."], engine.Calls);
     }
 
     [Fact]
@@ -111,9 +115,10 @@ public class MarianTranslatorTests
 
             var engine = new FakeEngine();
             var translator = new MarianTranslator(() => engine, () => true, new TranslationCache(file));
+            // Kısa cümle bağlamıyla önbellekte: "Stay close." aynı önceki cümleyle yine modelsiz döner.
             Assert.Equal("KRATOS: WE GO NOW. STAY CLOSE.", await translator.TranslateAsync("KRATOS: We go now. Stay close."));
-            Assert.Equal("STAY CLOSE. RUN!", await translator.TranslateAsync("Stay close. Run!"));
-            Assert.Equal(["Run!"], engine.Calls);
+            Assert.Equal("WE GO NOW. RUN TO THE BOAT, BOY!", await translator.TranslateAsync("We go now. Run to the boat, boy!"));
+            Assert.Equal(["Stay close. *** We go now.", "Run to the boat, boy!"], engine.Calls);
             var lines = translator.SpokenLines("KRATOS: We go now. Stay close.");
             Assert.Equal(["KRATOS", "KRATOS"], lines.Select(line => line.Speaker));
             Assert.Equal("STAY CLOSE.", lines[1].Turkish);
@@ -143,7 +148,7 @@ public class MarianTranslatorTests
         var (translator, engine) = Create();
         await translator.TranslateAsync("OLD MAN: Hello.");
         await translator.TranslateAsync("RUN, OLD MAN!");
-        Assert.Equal("Run, Old Man!", engine.Calls[^1]);
+        Assert.Equal("Hello. *** Run, Old Man!", engine.Calls[^1]);
     }
 
     [Fact]
@@ -173,7 +178,8 @@ public class MarianTranslatorTests
     public async Task SerializesConcurrentCalls()
     {
         var (translator, engine) = Create(delay: 5);
-        var lines = Enumerable.Range(0, 40).Select(i => $"Line number {i % 10}.").ToArray();
+        // Dört sözcük ve üstü: kısa satırın bağlamı paralel sırada değişirdi.
+        var lines = Enumerable.Range(0, 40).Select(i => $"This is line number {i % 10}.").ToArray();
 
         var results = await Task.WhenAll(lines.Select(l => Task.Run(() => translator.TranslateAsync(l))));
 
@@ -205,13 +211,108 @@ public class MarianTranslatorTests
     public async Task DisposeReleasesEngine()
     {
         var (translator, engine) = Create();
-        await translator.TranslateAsync("Wait!");
+        await translator.TranslateAsync("Wait for me at the boat.");
 
         translator.Dispose();
 
         Assert.True(engine.Disposed);
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => translator.TranslateAsync("New line."));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => translator.TranslateAsync("This is a new line."));
         // Önbellekteki satır hâlâ döner; motor gerekmez.
-        Assert.Equal("WAIT!", await translator.TranslateAsync("Wait!"));
+        Assert.Equal("WAIT FOR ME AT THE BOAT.", await translator.TranslateAsync("Wait for me at the boat."));
+    }
+
+    [Fact]
+    public void EngineUsesAtMostTwoThreads()
+    {
+        Assert.Equal(1, OnnxMarianEngine.IntraOpThreads(1));
+        Assert.Equal(2, OnnxMarianEngine.IntraOpThreads(4));
+        Assert.Equal(2, OnnxMarianEngine.IntraOpThreads(16));
+        Assert.Equal(2, OnnxMarianEngine.MaxIntraOpThreads);
+    }
+
+    [Fact]
+    public void CacheFileNameCarriesThePipelineVersion() =>
+        Assert.Equal("opus-mt-p" + FreeTranslation.PipelineVersion, MarianTranslator.EngineId);
+
+    [Fact]
+    public async Task ShortLineIsTranslatedWithThePreviousLine()
+    {
+        var engine = new FakeEngine
+        {
+            Map = s => s switch
+            {
+                "Where is your mother?" => "Annen nerede?",
+                "Where is your mother? *** Not you." => "Annen nerede? *** Sen değil.",
+                _ => "?",
+            },
+        };
+        var translator = new MarianTranslator(() => engine, () => true);
+        await translator.TranslateAsync("Where is your mother?");
+        Assert.Equal("Sen değil.", await translator.TranslateAsync("Not you."));
+        // Yeniden okunan satır aynı bağlamla önbellekten gelir.
+        Assert.Equal("Sen değil.", await translator.TranslateAsync("Not you."));
+        Assert.Equal(2, engine.Calls.Count);
+    }
+
+    [Fact]
+    public async Task ShortLineAfterALongPauseHasNoContext()
+    {
+        var now = DateTimeOffset.UnixEpoch;
+        var engine = new FakeEngine();
+        var translator = new MarianTranslator(() => engine, () => true, clock: () => now);
+        await translator.TranslateAsync("Where is your mother?");
+        now += TimeSpan.FromMinutes(1);
+        await translator.TranslateAsync("Not you.");
+        Assert.Equal(["Where is your mother?", "Not you."], engine.Calls);
+    }
+
+    [Fact]
+    public async Task AmbiguousContextFallsBackToTheLineAlone()
+    {
+        var engine = new FakeEngine { Map = s => s.Contains("***") ? "Annen nerede sen değil" : "Sen değil." };
+        var translator = new MarianTranslator(() => engine, () => true);
+        await translator.TranslateAsync("Where is your mother?");
+        Assert.Equal("Sen değil.", await translator.TranslateAsync("Not you."));
+    }
+
+    [Fact]
+    public async Task GlossaryTermsGetTheirTurkishAndSuffix()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "couchsubs-glossary-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(Path.Combine(directory, "gow.json"),
+                """{ "game": "God of War", "terms": { "Leviathan Axe": "Leviathan Baltası" }, "keep": ["Kratos"] }""");
+            var engine = new FakeEngine
+            {
+                Map = s => s == "Zarmon, throw the Velkor!" ? "Zarmon, Velkor'u fırlat." : "?",
+            };
+            var translator = new MarianTranslator(() => engine, () => true, glossary: new GlossaryStore(directory));
+            Assert.Equal("Kratos, Leviathan Baltası'nı fırlat!", await translator.TranslateAsync("KRATOS, THROW THE LEVIATHAN AXE!"));
+            Assert.Equal(["Zarmon, throw the Velkor!"], engine.Calls);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InformalLineGetsInformalImperatives()
+    {
+        var engine = new FakeEngine
+        {
+            Map = s => s switch
+            {
+                "I told you to wait for me." => "Sana beni beklemeni söyledim.",
+                "I told you to wait for me. *** Stay here!" => "Sana beni beklemeni söyledim. *** Burada bekleyin!",
+                _ => "?",
+            },
+        };
+        var translator = new MarianTranslator(() => engine, () => true);
+        Assert.Equal("Sana beni beklemeni söyledim. Burada bekle!", await translator.TranslateAsync("I told you to wait for me. Stay here!"));
+        var lines = translator.SpokenLines("I told you to wait for me. Stay here!");
+        Assert.Equal("Burada bekle!", lines[1].Turkish);
     }
 }
