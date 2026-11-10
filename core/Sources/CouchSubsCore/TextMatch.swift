@@ -26,13 +26,29 @@ public enum TextMatch {
         return 1 - Double(previous[y.count]) / Double(max(x.count, y.count)) >= threshold
     }
 
-    /// Yeni okuma, gönderilmiş altyazının yeniden okuması mı (sadeleştirilmiş metinler). Süslü yazı tipinde ya da
-    /// solarken OCR bir iki sözcüğü her karede başka çöpe çevirir ("ou$3e", "waters2aljd") ya da iki satırlık
-    /// altyazının bir satırını kaçırır; karakter benzerliği düşse de sözcükler aynı kalır. Rakam karışmış sözcükler
-    /// ve tek harfler çöp sayılıp karşılaştırmaya girmez. Metin belirgin uzadıysa (daktilo efekti) yeni satırdır.
+    /// Satırları ayrı ayrı sadeleştirip alt alta birleştirir; `isSameSubtitle` kaçırılan satırı bundan anlar.
+    public static func normalizeRows(_ s: String) -> String {
+        s.replacingOccurrences(of: "\r\n", with: "\n").split(separator: "\n", omittingEmptySubsequences: false)
+            .map { normalize(String($0)) }.filter { !$0.isEmpty }.joined(separator: "\n")
+    }
+
+    /// Yeni okuma, gönderilmiş altyazının yeniden okuması mı (sadeleştirilmiş metinler; `sent` satırları
+    /// `normalizeRows` ile alt alta verilebilir). Süslü yazı tipinde ya da solarken OCR bir iki sözcüğü her
+    /// karede başka çöpe çevirir ("ou$3e", "waters2aljd") ya da iki satırlık altyazının bir satırını kaçırır; karakter
+    /// benzerliği düşse de sözcükler aynı kalır. Rakam karışmış sözcükler ve tek harfler çöp sayılıp karşılaştırmaya girmez.
+    /// Başına ya da sonuna sözcük eklenmiş metin (daktilo efekti, "Nereye gidiyorsun?" / "Nereye gidiyorsun evlat?") yenidir;
+    /// sondan kısalmış metin ise ancak tam bir satırı eksikse aynı altyazıdır.
     public static func isSameSubtitle(_ reread: String, _ sent: String) -> Bool {
-        if isSimilar(reread, sent) { return true }
-        let x = cleanWords(reread), y = cleanWords(sent)
+        let rows = sent.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let flat = rows.joined(separator: " ")
+        let x = cleanWords(reread), y = cleanWords(flat)
+        // Uzayan metin (daktilo efekti ya da aynı sözlerle başlayan yeni satır) karakterce benzese de yenidir.
+        if !y.isEmpty, x.count > y.count, x.starts(with: y) || x.suffix(y.count).elementsEqual(y) { return false }
+        if isSimilar(reread, flat) { return true }
+        // Baştan ya da sondan kesilmiş okuma: altyazının yalnız tam satırları okunduysa aynıdır, yoksa başka bir cümledir.
+        if !x.isEmpty, x.count < y.count, y.starts(with: x) || y.suffix(x.count).elementsEqual(x) {
+            return isWholeRows(x.count, rows: rows, fromStart: y.starts(with: x))
+        }
         var remaining = y
         var shared = 0
         for word in x {
@@ -41,12 +57,23 @@ public enum TextMatch {
                 shared += 1
             }
         }
-        // Kaçırılmış satır: yeni okumanın sözcüklerinin hemen hepsi gönderilende var.
+        // Arasından çöp sözcükler düşmüş okuma: yeni okumanın sözcüklerinin hemen hepsi gönderilende var.
         if x.count >= 4, x.count <= y.count, Double(shared) >= Double(x.count) * 0.85 { return true }
         // Kısa satırda tek sözcük anlamı değiştirir ("where is the boy" / "ship"); orada yalnız karakter benzerliği geçerli.
         let longer = max(x.count, y.count), shorter = min(x.count, y.count)
         guard shorter >= 6, Double(shorter) / Double(longer) >= 0.75 else { return false }
         return Double(shared) / Double(longer) >= 0.75
+    }
+
+    /// Baştan (ya da sondan) `count` sözcük tam satırlara denk geliyor mu.
+    private static func isWholeRows(_ count: Int, rows: [String], fromStart: Bool) -> Bool {
+        var total = 0
+        for row in fromStart ? rows : rows.reversed() {
+            total += cleanWords(row).count
+            if total == count { return true }
+            if total > count { return false }
+        }
+        return false
     }
 
     private static func cleanWords(_ normalized: String) -> [Substring] {

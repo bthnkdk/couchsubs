@@ -52,6 +52,19 @@ public class SubtitleServerTests
             && l.Contains("\"box\":{\"bottom\":0.875,\"left\":0.25,\"right\":0.75,\"top\":0.8}"));
     }
 
+    /// TV yarı açık bağlantıyı adlı "ping" olayının gelmemesinden anlar; yorum satırını EventSource görmez.
+    [Fact]
+    public async Task PingIsSentAsNamedEvent()
+    {
+        using var server = new SubtitleServer(0, TimeSpan.FromMilliseconds(50));
+        var port = await server.StartAsync();
+        using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
+        using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
+        var lines = await ReadLines(reader, "event: ping");
+        Assert.Equal("event: ping", lines[^1]);
+        Assert.Equal("data: {}", await reader.ReadLineAsync());
+    }
+
     [Fact]
     public async Task StreamsScreenTranslationsAndTheirClear()
     {

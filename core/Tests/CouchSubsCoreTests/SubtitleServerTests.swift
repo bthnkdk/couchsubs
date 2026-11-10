@@ -42,6 +42,20 @@ final class SubtitleServerTests: XCTestCase {
             && $0.contains("\"box\":{\"bottom\":0.875,\"left\":0.25,\"right\":0.75,\"top\":0.8}") })
     }
 
+    /// TV yarı açık bağlantıyı adlı "ping" olayının gelmemesinden anlar; yorum satırını EventSource görmez.
+    func testPingIsSentAsNamedEvent() async throws {
+        let server = SubtitleServer(port: 0, pingInterval: 0.05)
+        let port = try await server.start()
+        defer { server.stop() }
+        let (bytes, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
+        var lines: [String] = []
+        for try await line in bytes.lines {
+            lines.append(line)
+            if lines.suffix(2) == ["event: ping", "data: {}"] { break }
+        }
+        XCTAssertEqual(Array(lines.suffix(2)), ["event: ping", "data: {}"])
+    }
+
     func testStreamsScreenTranslationsAndTheirClear() async throws {
         let server = SubtitleServer(port: 0)
         let port = try await server.start()

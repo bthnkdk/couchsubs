@@ -5,26 +5,49 @@ using CouchSubs.Core.Dubbing;
 namespace CouchSubs.Core;
 
 /// <summary>Kare → bölge → yazı tanıma → kararlılık → çeviri → TV.</summary>
-public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator translator, ISubtitleSender sender, ReadScheduler? scheduler = null)
+/// <param name="clock">Milisaniye saati; testlerde sahtesi verilir.</param>
+public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator translator, ISubtitleSender sender,
+    ReadScheduler? scheduler = null, Func<long>? clock = null)
 {
+    /// <summary>Satır ekrandan bundan uzun süre önce kalktıysa geç gelen çevirisi gösterilmez (sonraki sahnenin üstüne düşmesin).</summary>
+    public const int LateResultMs = 1000;
+    private const int RememberedPairs = 8;
+
     private readonly object gate = new();
+    private readonly Func<long> now = clock ?? DefaultClock;
     /// <summary>Varsayılanı her kareyi okur; uygulama gereksiz okumaları atlayan planı verir.</summary>
     private readonly ReadScheduler schedule = scheduler ?? ReadScheduler.Always();
-    /// <summary>Kareler saniyede ~20 kez okunur; yaklaşık 0,3 sn boş kalan bölge altyazının kalktığı anlamına gelir.</summary>
-    private readonly SubtitleStabilizer stabilizer = new(emptyFramesToClear: 6);
-    private readonly Dictionary<int, Task> translations = [];
+    private readonly SubtitleStabilizer stabilizer = new(clock: clock ?? DefaultClock);
     /// <summary>
-    /// Her çeviri isteği sıra numarası alır. Hızlı konuşmada çeviriler sırasız dönebilir:
-    /// daha yeni bir satırın çevirisi gösterilmediyse eski satırınki yine gösterilir.
+    /// Her çeviri isteği sıra numarası alır. Aynı anda yalnız bir çeviri sürer, bir tane de sırada bekler (en yenisi):
+    /// hızlı konuşmada araya giren satırlar atlanır, kuyruk konuşma hızıyla büyümez.
     /// </summary>
     private int lastRequested;
     private int lastShown;
+    private Request? inFlight;
+    private Request? pending;
+    private CancellationTokenSource? inFlightCancel;
+    private Task pump = Task.CompletedTask;
     /// <summary>Şu an oyun ekranında duran satırın numarası (bölge boşalınca null).</summary>
     private int? lineOnScreen;
+    /// <summary>Son çevrilen satırlar (kaynak → çeviri; zaten hedef dildeyse null). Geri gelen satır bunlardan yeniden gösterilir.</summary>
+    private readonly List<(int Number, string Source, string? Translation)> pairs = [];
     /// <summary>Okuma durdurulunca artar; önceki oturumdan dönen çeviriler gösterilmez.</summary>
     private int session;
     /// <summary>Son okunan satırlar; kare değişmediyse yeniden okunmaz, bunlar kullanılır.</summary>
     private Reading lastReading = Reading.Empty;
+
+    private static long DefaultClock() => Environment.TickCount64;
+
+    private sealed class Request(int number, string source, TextBox? box, int session)
+    {
+        public int Number { get; } = number;
+        public string Source { get; } = source;
+        public TextBox? Box { get; } = box;
+        public int Session { get; } = session;
+        /// <summary>Satırın ekrandan kalktığı an (hâlâ ekrandaysa null).</summary>
+        public long? LeftAt { get; set; }
+    }
 
     public (string Source, string Translation)? LastPair { get; private set; }
     /// <summary>Son gösterilen çevirinin oyundaki altyazısının karedeki yeri.</summary>
@@ -72,22 +95,97 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         lock (gate)
         {
             var action = stabilizer.Feed(reading.Text);
+            var box = reading.Box?.PlacedIn(area).CenteredOnScreen();
             switch (action.Kind)
             {
                 case StabilizerKind.Clear:
-                    lineOnScreen = null;
+                    LineLeft();
                     sender.Clear();
                     break;
                 case StabilizerKind.Translate:
-                    var number = ++lastRequested;
-                    var current = session;
-                    lineOnScreen = number;
-                    // Çevirmen burada, istek sırasıyla çağrılır (ayrı görevle başlatılsa sıra karışabilirdi).
-                    // Çeviri hemen bittiyse kendini zaten listeden çıkarmıştır; yeniden eklenmez.
-                    var box = reading.Box?.PlacedIn(area).CenteredOnScreen();
-                    var task = TranslateAndForget(action.Text!, box, number, current);
-                    if (!task.IsCompleted) translations[number] = task;
+                    LineLeft();
+                    Enqueue(action.Text!, box);
                     break;
+                case StabilizerKind.Restore:
+                    LineLeft();
+                    Restore(action.Text!, box);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>Ekrandaki satır kalktı (ya da yerine başkası geldi); çevirisi sürüyorsa ne zaman kalktığı not edilir.</summary>
+    private void LineLeft()
+    {
+        if (lineOnScreen is not { } number) return;
+        var time = now();
+        foreach (var request in new[] { inFlight, pending })
+            if (request is not null && request.Number == number) request.LeftAt ??= time;
+        lineOnScreen = null;
+    }
+
+    private void Enqueue(string source, TextBox? box)
+    {
+        var request = new Request(++lastRequested, source, box, session);
+        lineOnScreen = request.Number;
+        // Çeviri sürüyorsa yeni satır sıraya girer; sıradaki eski satır atlanır (artık ekranda değil).
+        if (inFlight is not null)
+        {
+            pending = request;
+            return;
+        }
+        inFlight = request;
+        pump = Pump(request);
+    }
+
+    /// <summary>Az önce kalkıp geri gelen satır: çevirmene gitmeden eski çevirisi yeniden gösterilir.</summary>
+    private void Restore(string source, TextBox? box)
+    {
+        var index = pairs.FindLastIndex(pair => pair.Source == source);
+        if (index >= 0)
+        {
+            var (number, _, translation) = pairs[index];
+            lineOnScreen = number;
+            if (translation is null) return;
+            sender.SendSubtitle(translation, 15000, box);
+            LastPair = (source, translation);
+            LastBox = box;
+            return;
+        }
+        // Çevirisi henüz gelmediyse istek sürüyordur; satır yeniden ekranda sayılır.
+        foreach (var request in new[] { inFlight, pending })
+        {
+            if (request is null || request.Source != source || request.Session != session) continue;
+            request.LeftAt = null;
+            lineOnScreen = request.Number;
+            return;
+        }
+        // Çevirisi hiç yoksa (atlanmış ya da başarısız olmuş) normal yoldan çevrilir.
+        Enqueue(source, box);
+    }
+
+    /// <summary>Süren çeviriyi, bitince de sıradakini çevirir; sıra boşalınca durur.</summary>
+    private async Task Pump(Request first)
+    {
+        var request = first;
+        while (true)
+        {
+            var cancel = new CancellationTokenSource();
+            lock (gate) inFlightCancel = cancel;
+            // Olay işleyicilerinden biri hata verse de sıra takılı kalmasın.
+            try { await Translate(request, cancel.Token); }
+            catch { }
+            lock (gate)
+            {
+                inFlightCancel = null;
+                cancel.Dispose();
+                var next = pending;
+                pending = null;
+                // Ekrandan çoktan kalkmış satır çevrilmez; çevirisi zaten gösterilmeyecekti.
+                if (next is not null && (next.Session != session || next.LeftAt is { } left && now() - left > LateResultMs)) next = null;
+                inFlight = next;
+                if (next is null) return;
+                request = next;
             }
         }
     }
@@ -97,37 +195,32 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     {
         while (true)
         {
-            Task[] pending;
-            lock (gate) pending = [.. translations.Values];
-            if (pending.Length == 0) return;
-            await Task.WhenAll(pending);
+            Task running;
+            lock (gate) running = pump;
+            if (running.IsCompleted) return;
+            await running;
         }
     }
 
     /// <summary>Satır ekrandan kalktıktan sonra gelen çevirinin TV'de kalacağı süre (TV uygulamasıyla aynı kural).</summary>
     public static int ReadingTime(string text) => Math.Min(8000, 2000 + (text.Length * 60));
 
-    private async Task TranslateAndForget(string source, TextBox? box, int number, int current)
+    private async Task Translate(Request request, CancellationToken token)
     {
-        await Translate(source, box, number, current);
-        lock (gate) translations.Remove(number);
-    }
-
-    private async Task Translate(string source, TextBox? box, int number, int current)
-    {
+        var source = request.Source;
         string translated;
         try
         {
-            translated = await translator.TranslateAsync(source);
+            translated = await translator.TranslateAsync(source, token);
         }
         catch (Exception error)
         {
             lock (gate)
             {
-                if (current != session) return;
-                // Model eksikse ya da geçici bir hata olduysa satır ekranda kaldıkça yeniden denenir.
+                if (request.Session != session) return;
+                // Model eksikse ya da geçici bir hata olduysa satır ekranda kaldıkça (saniyede en çok bir kez) yeniden denenir.
                 LastError = (error as TranslatorException)?.Status;
-                if (number == lineOnScreen) stabilizer.ForgetSent();
+                if (request.Number == lineOnScreen) stabilizer.ForgetSent();
             }
             TranslationResult?.Invoke(LastError);
             return;
@@ -135,22 +228,35 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
 
         lock (gate)
         {
-            if (current != session) return;
+            if (request.Session != session) return;
             LastError = null;
         }
         TranslationResult?.Invoke(null);
 
         lock (gate)
         {
-            if (number <= lastShown || !stabilizer.ShouldSend(source, translated)) return;
-            lastShown = number;
+            if (request.Session != session) return;
+            var shouldSend = stabilizer.ShouldSend(source, translated);
+            Remember(request.Number, source, shouldSend ? translated : null);
+            if (request.Number <= lastShown || !shouldSend) return;
+            var onScreen = request.Number == lineOnScreen;
+            // Satır ekrandan çoktan kalktıysa çevirisi sonraki sahnenin üstüne düşmesin.
+            if (!onScreen && request.LeftAt is { } left && now() - left > LateResultMs) return;
+            lastShown = request.Number;
             // Satır hâlâ ekrandaysa kalkınca silinir; kalktıysa okunacak kadar gösterilir.
-            sender.SendSubtitle(translated, number == lineOnScreen ? 15000 : ReadingTime(translated), box);
+            sender.SendSubtitle(translated, onScreen ? 15000 : ReadingTime(translated), request.Box);
             LastPair = (source, translated);
-            LastBox = box;
+            LastBox = request.Box;
         }
         PairShown?.Invoke(source, translated);
         if (SpeechReady is { } speech) speech(translator.SpokenLines(source));
+    }
+
+    private void Remember(int number, string source, string? translation)
+    {
+        pairs.RemoveAll(pair => pair.Source == source);
+        pairs.Add((number, source, translation));
+        if (pairs.Count > RememberedPairs) pairs.RemoveAt(0);
     }
 
     /// <summary>Okuma durunca TV'deki son altyazıyı kaldırır.</summary>
@@ -160,6 +266,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         {
             session++;
             lineOnScreen = null;
+            pending = null;
+            inFlightCancel?.Cancel();
+            pairs.Clear();
             lastReading = Reading.Empty;
             schedule.Reset();
             if (stabilizer.Reset() == StabilizerAction.Clear) sender.Clear();
