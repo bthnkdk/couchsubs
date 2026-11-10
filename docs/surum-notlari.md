@@ -4,15 +4,10 @@ CouchSubs'ın yeni deneme sürümü. Türkçe dil desteği olmayan PS5 oyunları
 
 **Bu sürümde yeni**
 
-- **Daha kararlı altyazı.** Aynı çevirinin üst üste gelmesi ve hızlı konuşmada satırların kaybolması, karışması ve gecikmesi giderildi. Kısa süre okunamayan satır yeniden gönderilmiyor; çeviri kuyruğu birikmiyor; ekrandan kalkmış satırın çevirisi sonraki sahnenin üstüne düşmüyor.
-- **Hızlı konuşmada önceki satırlar ekranda kalıyor (TV uygulaması 0.9.9).** Yeni satır gelince önceki çeviri onun üstünde küçük ve soluk olarak kısa süre daha duruyor; üç kişi art arda konuşursa üç satır görünüyor.
-- **Yapay zekâ ile çeviri (isteğe bağlı).** Ayarlar › Çeviri'den Google Gemini, OpenAI ya da Anthropic Claude kendi API anahtarınızla seçilebiliyor; önceki satırları da bilerek çeviriyor. Ücret sizin hesabınızdan çıkar; sorun olursa o satır ücretsiz çeviriyle gelir.
-- **Ücretsiz çeviri daha iyi.** Oyun adları ve terimleri bozulmuyor, Türkçe ekleri doğru geliyor (Kratos'u, Midgard'a); büyük harfli altyazılarda adlar korunuyor; "Boy!", "Do it." gibi kısa satırlar önceki cümleyle birlikte çevriliyor; ünlem ve soru işaretleri korunuyor. Kendi sözlük dosyanızı da ekleyebilirsiniz.
-- **Çeviriler hatırlanıyor.** Bir kez çevrilen satır sonraki oyunlarda anında geliyor ve DeepL kotası harcanmıyor. DeepL'e önceki satırlar bağlam olarak gidiyor.
-- **TV bağlantısı kendini toparlıyor.** Bağlantı yarı kopunca TV kendisi yeniden bağlanıyor; çeviri artık "TV'de Tamam'a basınca geri gelme" durumuna düşmemeli.
-- **Android TV ve TCL:** HDMI girişi doğru seçiliyor, uygulama öne gelince görüntü yeniden açılıyor (bildiren: [onepunchmanq](https://x.com/onepunchmanq)).
-- **Windows:** LG TV'de doğru girilen parolanın "yanlış" sayılması düzeltildi; kurulum PlayStation girişi için gereken WebView2'yi de kuruyor.
-- **Daha hafif:** çeviri en fazla 2 işlemci çekirdeği kullanıyor.
+- **Altyazı yazı rengi:** Ayarlar › TV'de bölümünden beyaz ya da sarı seçilebiliyor; TV'de (TV uygulaması 0.9.10) ve OBS katmanında geçerli (katkı: [Kadir Eker](https://github.com/kadireker)).
+- **Mac'te güncelleme her açılışta kontrol ediliyor;** uygulama açık kaldıkça saatte bir de bakıyor. Yeni sürüm artık hemen görünüyor.
+
+**beta.23'te gelenler:** daha kararlı altyazı (tekrar eden ve kaybolan satırlar giderildi), hızlı konuşmada önceki satırların TV'de üstte kalması (TV uygulaması 0.9.9), isteğe bağlı yapay zekâ çevirisi (Gemini, OpenAI, Claude), oyun sözlüğüyle daha iyi ücretsiz çeviri, kalıcı çeviri önbelleği, TV'nin kopan bağlantıyı kendisi toparlaması, Android TV'de doğru HDMI girişi, Windows'ta LG parolası ve WebView2 düzeltmeleri.
 
 **beta.22'de gelenler:** LG TV'de sihirli kumandanın işaretçisiyle Tamam tuşu (TV uygulaması 0.9.8).
 
@@ -56,4 +51,4 @@ CouchSubs'ın yeni deneme sürümü. Türkçe dil desteği olmayan PS5 oyunları
 
 ---
 
-New beta. Steadier subtitles: no more repeated lines, and fast dialogue no longer drops, mixes up or delays lines. On the TV (app 0.9.9) the previous one or two lines stay above the new one for a moment in fast dialogue. Optional AI translation with your own Google Gemini, OpenAI or Anthropic Claude key (Settings › Translation), with the free engine as fallback. Better free translation: game names and terms stay intact with correct Turkish suffixes, ALL CAPS lines keep names, short lines are translated with the previous sentence, and you can add your own glossary. Translations are remembered across sessions. The TV reconnects by itself after a half-open connection. Android TV picks the right HDMI input. Windows: correct LG passphrase no longer rejected; the installer adds WebView2 for the PlayStation sign-in. Download: [Mac (DMG)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-macos.dmg) · [Windows (installer)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-windows-Setup.exe).
+New beta. Subtitle text colour: white or yellow under Settings › On TV, on the TV and in the OBS overlay (contributed by Kadir Eker). The Mac app now checks for updates on every launch and hourly while open. Also includes beta.23: steadier subtitles, previous lines kept on the TV in fast dialogue (TV app 0.9.9), optional AI translation (Gemini, OpenAI, Claude), better free translation with a game glossary, a persistent translation cache, TV reconnect, Android TV HDMI input fix, Windows LG passphrase and WebView2 fixes. Download: [Mac (DMG)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-macos.dmg) · [Windows (installer)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-windows-Setup.exe).
