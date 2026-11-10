@@ -4,7 +4,17 @@ CouchSubs'ın yeni deneme sürümü. Türkçe dil desteği olmayan PS5 oyunları
 
 **Bu sürümde yeni**
 
-- **LG TV'de sihirli kumandanın işaretçisi açıkken Tamam tuşu çalışıyor (TV uygulaması 0.9.8).** Bekleme ekranında demoyu başlatıyor, sonrasında durum panelini açıp kapatıyor.
+- **Daha kararlı altyazı.** Aynı çevirinin üst üste gelmesi ve hızlı konuşmada satırların kaybolması, karışması ve gecikmesi giderildi. Kısa süre okunamayan satır yeniden gönderilmiyor; çeviri kuyruğu birikmiyor; ekrandan kalkmış satırın çevirisi sonraki sahnenin üstüne düşmüyor.
+- **Hızlı konuşmada önceki satırlar ekranda kalıyor (TV uygulaması 0.9.9).** Yeni satır gelince önceki çeviri onun üstünde küçük ve soluk olarak kısa süre daha duruyor; üç kişi art arda konuşursa üç satır görünüyor.
+- **Yapay zekâ ile çeviri (isteğe bağlı).** Ayarlar › Çeviri'den Google Gemini, OpenAI ya da Anthropic Claude kendi API anahtarınızla seçilebiliyor; önceki satırları da bilerek çeviriyor. Ücret sizin hesabınızdan çıkar; sorun olursa o satır ücretsiz çeviriyle gelir.
+- **Ücretsiz çeviri daha iyi.** Oyun adları ve terimleri bozulmuyor, Türkçe ekleri doğru geliyor (Kratos'u, Midgard'a); büyük harfli altyazılarda adlar korunuyor; "Boy!", "Do it." gibi kısa satırlar önceki cümleyle birlikte çevriliyor; ünlem ve soru işaretleri korunuyor. Kendi sözlük dosyanızı da ekleyebilirsiniz.
+- **Çeviriler hatırlanıyor.** Bir kez çevrilen satır sonraki oyunlarda anında geliyor ve DeepL kotası harcanmıyor. DeepL'e önceki satırlar bağlam olarak gidiyor.
+- **TV bağlantısı kendini toparlıyor.** Bağlantı yarı kopunca TV kendisi yeniden bağlanıyor; çeviri artık "TV'de Tamam'a basınca geri gelme" durumuna düşmemeli.
+- **Android TV ve TCL:** HDMI girişi doğru seçiliyor, uygulama öne gelince görüntü yeniden açılıyor (bildiren: [onepunchmanq](https://x.com/onepunchmanq)).
+- **Windows:** LG TV'de doğru girilen parolanın "yanlış" sayılması düzeltildi; kurulum PlayStation girişi için gereken WebView2'yi de kuruyor.
+- **Daha hafif:** çeviri en fazla 2 işlemci çekirdeği kullanıyor.
+
+**beta.22'de gelenler:** LG TV'de sihirli kumandanın işaretçisiyle Tamam tuşu (TV uygulaması 0.9.8).
 
 **beta.21'de gelenler:** TV'de altyazının bir an görünüp kaybolması için düzeltme ve panelde Tanı satırı (TV uygulaması 0.9.7), Windows'ta PS5'in IP adresi değişince yeniden bulunması, PS5 eşleştirme hatalarında gerçek sebebin görünmesi, Windows dublajında Türkçe ses motoru hatasının gösterilmesi.
 
@@ -46,4 +56,4 @@ CouchSubs'ın yeni deneme sürümü. Türkçe dil desteği olmayan PS5 oyunları
 
 ---
 
-New beta. OBS overlay: streamers using a capture card can add a Browser source at `http://localhost:8787/obs` (1920×1080) and the Turkish subtitles appear over the game on screen and on stream, covering the English line when its position is known; the address is under Settings › OBS overlay. Subtitle history on Mac (contributed by rumpony): the last 50 translations of the session with their English text. Also includes beta.17's fixes (macOS 26 launch, Remote Play crash on disconnect, disk-full warning). Download: [Mac (DMG)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-macos.dmg) · [Windows (installer)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-windows-Setup.exe).
+New beta. Steadier subtitles: no more repeated lines, and fast dialogue no longer drops, mixes up or delays lines. On the TV (app 0.9.9) the previous one or two lines stay above the new one for a moment in fast dialogue. Optional AI translation with your own Google Gemini, OpenAI or Anthropic Claude key (Settings › Translation), with the free engine as fallback. Better free translation: game names and terms stay intact with correct Turkish suffixes, ALL CAPS lines keep names, short lines are translated with the previous sentence, and you can add your own glossary. Translations are remembered across sessions. The TV reconnects by itself after a half-open connection. Android TV picks the right HDMI input. Windows: correct LG passphrase no longer rejected; the installer adds WebView2 for the PlayStation sign-in. Download: [Mac (DMG)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-macos.dmg) · [Windows (installer)](https://github.com/yorulmazsinan/couchsubs/releases/latest/download/CouchSubs-windows-Setup.exe).
