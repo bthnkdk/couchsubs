@@ -8,18 +8,24 @@ using CouchSubs.Core.Dubbing;
 namespace CouchSubs.Translation;
 
 /// <summary>
-/// Cihaz üstü İngilizce→Türkçe çeviri (OPUS-MT, ONNX Runtime). Model ilk çeviride yüklenir; aynı satır
-/// oyunda defalarca okunduğu için sonuçlar girdi metnine göre önbelleklenir (Mac'teki gibi). Uygulama kalıcı
-/// önbelleği verir: önceki oturumlarda çevrilmiş satır ve cümleler modeli hiç çalıştırmadan döner.
+/// Cihaz üstü İngilizce→Türkçe çeviri (OPUS-MT, ONNX Runtime). Model ilk çeviride yüklenir; aynı cümle oyunda
+/// defalarca okunduğu için sonuçlar önbelleklenir (Mac'teki gibi). Uygulama kalıcı önbelleği verir: önceki
+/// oturumlarda çevrilmiş cümleler modeli hiç çalıştırmadan döner. Metin hattı (terim sözlüğü, kısa satır bağlamı,
+/// Türkçe düzeltmeler) <see cref="FreeTranslation"/>'dadır, Mac'teki Apple çevirisiyle ortaktır.
 /// </summary>
 public sealed class MarianTranslator : ITextTranslator, IDisposable
 {
-    /// <summary>Kalıcı önbellek dosyasındaki motor adı; model değişirse bu da değişmeli.</summary>
-    public const string EngineId = "opus-mt";
+    /// <summary>
+    /// Kalıcı önbellek dosyasındaki motor adı; model ya da metin hattı (<see cref="FreeTranslation.PipelineVersion"/>)
+    /// değişirse bu da değişir, eski kurallarla çevrilmiş satırlar gösterilmez.
+    /// </summary>
+    public static readonly string EngineId = "opus-mt-p" + FreeTranslation.PipelineVersion;
 
     private readonly Func<ISentenceEngine> _engineFactory;
     private readonly Func<bool> _isInstalled;
     private readonly TranslationCache _cache;
+    private readonly GlossaryStore _glossary;
+    private readonly RecentLines _recent;
     /// <summary>Konuşmacı etiketlerinden öğrenilen adlar (küçük harfle); cümle içinde de büyük harfle kalırlar.</summary>
     private readonly ConcurrentDictionary<string, byte> _names = new(StringComparer.Ordinal);
     /// <summary>Altyazı → seslendirilecek cümleler (dublaj).</summary>
@@ -30,15 +36,20 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
     private bool _disposed;
 
     /// <param name="cache">Kalıcı önbellek; verilmezse yalnız bellekte tutulur.</param>
+    /// <param name="glossary">Terim sözlüğü; verilmezse genel sözlük ve %LOCALAPPDATA%\CouchSubs\glossary\*.json.</param>
     public MarianTranslator(string modelDirectory, int maxOutputTokens = 128, int beams = OnnxMarianEngine.DefaultBeams,
-        TranslationCache? cache = null)
-        : this(() => new OnnxMarianEngine(modelDirectory, maxOutputTokens, beams), () => IsInstalledIn(modelDirectory), cache) { }
+        TranslationCache? cache = null, GlossaryStore? glossary = null)
+        : this(() => new OnnxMarianEngine(modelDirectory, maxOutputTokens, beams), () => IsInstalledIn(modelDirectory), cache,
+            glossary ?? new GlossaryStore(GlossaryStore.UserDirectory)) { }
 
-    internal MarianTranslator(Func<ISentenceEngine> engineFactory, Func<bool> isInstalled, TranslationCache? cache = null)
+    internal MarianTranslator(Func<ISentenceEngine> engineFactory, Func<bool> isInstalled, TranslationCache? cache = null,
+        GlossaryStore? glossary = null, Func<DateTimeOffset>? clock = null)
     {
         _engineFactory = engineFactory;
         _isInstalled = isInstalled;
         _cache = cache ?? new TranslationCache();
+        _glossary = glossary ?? GlossaryStore.BuiltInOnly();
+        _recent = new RecentLines(clock);
     }
 
     public TranslatorStatus Status => _engine is not null || _isInstalled() ? TranslatorStatus.Ready : TranslatorStatus.NeedsDownload;
@@ -50,59 +61,72 @@ public sealed class MarianTranslator : ITextTranslator, IDisposable
     /// <summary>Modeli önceden yükler ve bir kez çalıştırır; ilk altyazı beklemesin.</summary>
     public async Task WarmUpAsync(CancellationToken cancellationToken = default)
     {
-        await TranslateUncachedAsync("Hello.", cancellationToken).ConfigureAwait(false);
+        await TranslateSentenceAsync("Hello.", null, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<string> TranslateAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(text);
-        if (_cache.TryGet(text, out var cached)) return cached;
-
-        var builder = new StringBuilder();
+        // Kısa cümlenin bağlamı: aynı satırdaki önceki cümle, yoksa bu satırdan önce gösterilen satırın son cümlesi.
+        var previousLine = _recent.Shown(text);
         var pieces = SubtitleSegmenter.Split(text);
         // "OLD MAN: " → "old", "man": çok sözcüklü adın her sözcüğü ayrıca tanınır.
         foreach (var name in pieces.Select(SubtitleSegmenter.LabelName).OfType<string>())
             foreach (var word in name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => w.Length >= 2))
                 _names[word.ToLowerInvariant()] = 0;
+        var previous = previousLine is null ? null : LastSentence(previousLine);
         var translations = new List<string?>(pieces.Count);
         foreach (var piece in pieces)
         {
             if (!piece.Translate)
             {
-                builder.Append(piece.Text);
                 translations.Add(null);
                 continue;
             }
-            if (!_cache.TryGet(piece.Text, out var sentence))
-                sentence = await TranslateUncachedAsync(piece.Text, cancellationToken).ConfigureAwait(false);
-            builder.Append(sentence);
-            translations.Add(sentence);
+            var context = FreeTranslation.IsShort(piece.Text) ? previous : null;
+            translations.Add(await TranslateSentenceAsync(piece.Text, context, cancellationToken).ConfigureAwait(false));
+            previous = piece.Text;
         }
+        // Hitap satırın bütününe bakar ("Sana söyledim. Bekleyin!"); önbellekteki cümle çevirileri değişmez.
+        var final = TurkishPostEdit.Register(translations);
+        var builder = new StringBuilder();
+        for (var i = 0; i < pieces.Count; i++) builder.Append(final[i] ?? pieces[i].Text);
         if (_speech.Count >= 512) _speech.Clear();
-        _speech[text] = SpeechScript.Lines(pieces, translations);
-        var result = builder.ToString();
-        _cache.Store(text, result);
-        return result;
+        _speech[text] = SpeechScript.Lines(pieces, final);
+        return builder.ToString();
+    }
+
+    private static string? LastSentence(string line)
+    {
+        string? last = null;
+        foreach (var piece in SubtitleSegmenter.Split(line))
+            if (piece.Translate) last = piece.Text;
+        return last;
     }
 
     public IReadOnlyList<SpokenLine> SpokenLines(string text) =>
         _speech.TryGetValue(text, out var lines) ? lines : SpeechScript.FromCache(text, _cache);
 
-    private async Task<string> TranslateUncachedAsync(string sentence, CancellationToken cancellationToken)
+    private async Task<string> TranslateSentenceAsync(string sentence, string? context, CancellationToken cancellationToken)
     {
+        var glossary = _glossary.Current;
+        var key = FreeTranslation.CacheKey(sentence, context, glossary);
+        if (_cache.TryGet(key, out var known)) return known;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             // Beklerken başka bir çağrı aynı cümleyi çevirmiş olabilir.
-            if (_cache.TryGet(sentence, out var cached)) return cached;
+            if (_cache.TryGet(key, out var cached)) return cached;
             var engine = _engine ??= CreateEngine();
+            var names = _names.Keys.ToHashSet(StringComparer.Ordinal);
+            names.UnionWith(glossary.CapitalWords);
             // Çıkarım CPU'yu saniyenin onda biri kadar tutar; çağıranın (arayüz) iş parçacığını bloklamasın.
-            var input = GameEnglish.Plain(SubtitleSegmenter.NormalizeCase(sentence, _names.Keys.ToHashSet(StringComparer.Ordinal)));
-            var translation = await Task.Run(() => engine.Translate(input, cancellationToken), cancellationToken)
-                .ConfigureAwait(false);
+            var translation = await Task.Run(() => FreeTranslation.Translate(sentence, context, glossary,
+                text => SubtitleSegmenter.NormalizeCase(text, names),
+                input => engine.Translate(input, cancellationToken)), cancellationToken).ConfigureAwait(false);
             // Sıra bırakılmadan önce önbelleğe yazılır; sırada bekleyen aynı cümle yeniden çevrilmez.
-            _cache.Store(sentence, translation);
+            _cache.Store(key, translation);
             return translation;
         }
         finally
