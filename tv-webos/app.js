@@ -26,10 +26,17 @@
   // Gösterilen satırın oyundaki İngilizce altyazının yeri (ekrana oranla), bilinmiyorsa null.
   var currentBox = null;
 
-  // Önceki satır bu süreden kısa göründüyse okunamamış olabilir; yeni satırın üstünde bir süre daha kalır.
-  var PREVIOUS_HOLD_MS = 2500;
+  // Hızlı konuşma: yeni satır öncekinden bu süre içinde gelirse önceki okunamamış olabilir. Önceki çeviri yeni satırın
+  // üstünde küçük ve soluk olarak bir süre daha kalır, sonra solarak kalkar. Ekranda en çok iki satır olur.
+  var STACK_WITHIN_MS = 1500;
+  var PREVIOUS_HOLD_MS = 1500;
+  var PREVIOUS_FADE_MS = 400;
+  // Yeni satırla yer değiştirmedikçe hiçbir satır bundan kısa görünmez.
+  var MIN_VISIBLE_MS = 1200;
   var shownAt = 0;
+  var shownParagraphs = false;
   var previousTimer = null;
+  var previousFadeTimer = null;
 
   var hideTimer = null;
   var panelTimer = null;
@@ -148,10 +155,18 @@
 
   // paragraphs: görev paneli gibi başlık ve maddeli yazılar satır satır, sola yaslı gösterilir.
   function showSubtitle(text, duration, box, paragraphs) {
-    // Önceki satır artık ayrıca gösterilmez: iki kutu üst üste binmiş gibi görünüyor, aynı cümlenin iki okunuşu
-    // da ikinci çeviri gibi duruyordu. Yeni satır eskisinin yerine geçer.
-    hidePrevious();
-    shownAt = Date.now();
+    var now = Date.now();
+    var current = $('subtitle-text').textContent;
+    // Önceki satır kısa göründüyse yeni satırın üstünde kalır. Aynı cümlenin başka bir okunuşu (ya da yeniden gelen
+    // satır) ikinci çeviri gibi durmasın diye üste çıkmaz; görev paneli gibi çok satırlı yazılar da üst üste binmez.
+    if ($('subtitle').className !== 'hidden' && current && now - shownAt < STACK_WITHIN_MS &&
+        !paragraphs && !shownParagraphs && !sameLine(current, text)) {
+      showPrevious(current);
+    } else {
+      hidePrevious();
+    }
+    shownAt = now;
+    shownParagraphs = !!paragraphs;
     holdUntil = shownAt + Math.min(HOLD_MAX_MS, 2000 + text.length * 60);
     currentBox = validBox(box);
     $('subtitle-text').textContent = text;
@@ -163,7 +178,7 @@
     notePlace();
     clearTimeout(hideTimer);
     // Geçersiz ya da çok kısa süre yazıyı gösterir göstermez kaldırmasın.
-    var ms = duration > 0 ? Math.max(1000, duration) : Math.min(8000, 2000 + text.length * 60);
+    var ms = duration > 0 ? Math.max(MIN_VISIBLE_MS, duration) : Math.min(8000, 2000 + text.length * 60);
     hideTimer = setTimeout(function () { hideSubtitle('timer'); }, ms);
   }
 
@@ -199,16 +214,34 @@
     hideTimer = setTimeout(function () { hideSubtitle('clear-held'); }, left);
   }
 
+  // Önceki satırın yerinde zaten daha eski bir satır varsa onun yerini alır (en çok iki satır).
   function showPrevious(text) {
+    clearTimeout(previousTimer);
+    clearTimeout(previousFadeTimer);
     $('subtitle-prev-text').textContent = text;
     $('subtitle-prev').className = '';
-    clearTimeout(previousTimer);
-    previousTimer = setTimeout(hidePrevious, PREVIOUS_HOLD_MS);
+    previousTimer = setTimeout(function () {
+      $('subtitle-prev').className = 'fading';
+      previousFadeTimer = setTimeout(hidePrevious, PREVIOUS_FADE_MS);
+    }, PREVIOUS_HOLD_MS);
   }
 
   function hidePrevious() {
     clearTimeout(previousTimer);
+    clearTimeout(previousFadeTimer);
     $('subtitle-prev').className = 'hidden';
+  }
+
+  // Büyük-küçük harf ve noktalama dışında aynı mı, ya da biri ötekinin başı/devamı mı ("Kapı" → "Kapı daha fazla…").
+  function sameLine(a, b) {
+    var x = plainText(a);
+    var y = plainText(b);
+    if (!x || !y) return x === y;
+    return x === y || x.indexOf(y) >= 0 || y.indexOf(x) >= 0;
+  }
+
+  function plainText(text) {
+    return String(text).toLowerCase().replace(/[\s.,!?;:…"'“”‘’«»()\[\]\-–—]+/g, '');
   }
 
   // --- Ekranı çevir ---
@@ -554,24 +587,29 @@
   // --- Demo ---
   // Mağaza incelemesi ve ilk kez açanlar için: PS5 ve bilgisayar olmadan örnek altyazılar gösterilir.
 
-  var DEMO_LINES = [
-    'Buraya ayıracak vaktimiz yok.',
-    'MİRA: Kapı daha fazla dayanmayacak!',
-    'Yakın dur. İlerideki yol tehlikeli.',
-    'Bekle! Sen de kimsin?',
-    'Bu iş henüz bitmedi.'
-  ];
+  // next: sonraki satıra kadar geçen süre. Kısa olanlar hızlı konuşmayı gösterir: önceki satır üstte soluk kalır.
   var DEMO_LINE_MS = 3200;
   var DEMO_GAP_MS = 700;
+  var DEMO_FAST_MS = 1000;
+  var DEMO_LINES = [
+    { text: 'Buraya ayıracak vaktimiz yok.', next: DEMO_LINE_MS + DEMO_GAP_MS },
+    { text: 'MİRA: Kapı daha fazla dayanmayacak!', next: DEMO_LINE_MS + DEMO_GAP_MS },
+    { text: 'Yakın dur.', next: DEMO_FAST_MS },
+    { text: 'İlerideki yol tehlikeli.', next: DEMO_LINE_MS + DEMO_GAP_MS },
+    { text: 'Bekle! Sen de kimsin?', next: DEMO_FAST_MS },
+    { text: 'Silahını indir!', next: DEMO_LINE_MS + DEMO_GAP_MS },
+    { text: 'Bu iş henüz bitmedi.', next: DEMO_LINE_MS + DEMO_GAP_MS }
+  ];
   var demoTimer = null;
   var demoIndex = 0;
 
   function demoRunning() { return demoTimer !== null; }
 
   function nextDemoLine() {
-    showSubtitle(DEMO_LINES[demoIndex], DEMO_LINE_MS);
+    var line = DEMO_LINES[demoIndex];
+    showSubtitle(line.text, DEMO_LINE_MS);
     demoIndex = (demoIndex + 1) % DEMO_LINES.length;
-    demoTimer = setTimeout(nextDemoLine, DEMO_LINE_MS + DEMO_GAP_MS);
+    demoTimer = setTimeout(nextDemoLine, line.next);
   }
 
   function startDemo() {

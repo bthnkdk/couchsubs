@@ -68,8 +68,16 @@ html, body {
 }
 #screen .item.paragraphs { text-align: left; white-space: pre-line; }
 
-/* Hızlı konuşmada önceki satır kısa süre yeni satırın üstünde, daha soluk durur. */
-#subtitle-prev { margin-bottom: 10px; opacity: 0.7; }
+/* Hızlı konuşmada önceki satır kısa süre yeni satırın üstünde, daha küçük ve soluk durur; sonra solarak kalkar.
+   Aradaki boşluk iki kutunun üst üste binmiş gibi görünmesini önler. Solma yalnız bu satırdadır; #subtitle'ın
+   kendi katmanı ve görünürlüğü değişmez. */
+#subtitle-prev {
+  margin-bottom: 14px;
+  opacity: 0.6;
+  -webkit-transition: opacity 0.4s linear;
+  transition: opacity 0.4s linear;
+}
+#subtitle-prev.fading { opacity: 0; }
 #subtitle-prev.hidden { display: none; }
 
 #subtitle-prev-text {
