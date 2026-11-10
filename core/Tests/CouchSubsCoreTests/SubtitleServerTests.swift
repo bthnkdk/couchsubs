@@ -111,13 +111,14 @@ final class SubtitleServerTests: XCTestCase {
         let server = SubtitleServer(port: 0)
         let port = try await server.start()
         defer { server.stop() }
-        server.sendStyle(SubtitleStyle(fontSize: 58, bottomPercent: 10, placement: .above, background: 40, bold: true))
+        server.sendStyle(SubtitleStyle(fontSize: 58, bottomPercent: 10, placement: .above, background: 40, bold: true, textColor: .yellow))
 
         let (bytes, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
         var sawStyle = false
         for try await line in bytes.lines where line.hasPrefix("data:") {
             sawStyle = line.contains("\"fontSize\":58") && line.contains("\"bottomPercent\":10") && line.contains("\"placement\":\"above\"")
                 && line.contains("\"background\":40") && line.contains("\"bold\":true")
+                && line.contains("\"textColor\":\"yellow\"")
             break
         }
         XCTAssertTrue(sawStyle)
@@ -178,6 +179,7 @@ final class SubtitleServerTests: XCTestCase {
 
     func testOldSavedStyleGetsNewDefaults() throws {
         let style = try JSONDecoder().decode(SubtitleStyle.self, from: Data(#"{"fontSize":58,"bottomPercent":12}"#.utf8))
-        XCTAssertEqual(style, SubtitleStyle(fontSize: 58, bottomPercent: 12, placement: .cover, background: 72, bold: false))
+        XCTAssertEqual(style, SubtitleStyle(fontSize: 58, bottomPercent: 12, placement: .cover, background: 72, bold: false,
+                                             textColor: .white))
     }
 }

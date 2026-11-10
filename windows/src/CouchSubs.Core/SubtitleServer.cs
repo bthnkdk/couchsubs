@@ -32,7 +32,16 @@ public sealed record SubtitleStyle(
     int BottomPercent = 7,
     SubtitlePlacement Placement = SubtitlePlacement.Cover,
     int Background = 72,
-    bool Bold = false);
+    bool Bold = false,
+    SubtitleTextColor TextColor = SubtitleTextColor.White);
+
+/// <summary>TV'de altyazı yazısının rengi.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter<SubtitleTextColor>))]
+public enum SubtitleTextColor
+{
+    White,
+    Yellow,
+}
 
 /// <summary>Altyazıları TV'ye ileten taraf (gerçekte <see cref="SubtitleServer"/>).</summary>
 public interface ISubtitleSender
@@ -384,6 +393,7 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
             ["bottomPercent"] = style.BottomPercent,
             ["fontSize"] = style.FontSize,
             ["placement"] = style.Placement.ToString().ToLowerInvariant(),
+            ["textColor"] = style.TextColor.ToString().ToLowerInvariant(),
         });
 
     private static string Frame(string name, SortedDictionary<string, object> json) =>

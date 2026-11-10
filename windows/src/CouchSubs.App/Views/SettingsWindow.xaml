@@ -73,6 +73,11 @@
                         </Grid>
                         <CheckBox x:Name="Bold" Content="{t:T 'Bold text'}" Foreground="{DynamicResource textPrimaryBrush}" Margin="0,0,0,16"
                                   Checked="OnBold" Unchecked="OnBold" />
+                        <TextBlock Text="{t:T 'Text color'}" Margin="0,0,0,8" />
+                        <ComboBox x:Name="TextColor" SelectionChanged="OnTextColor" Margin="0,0,0,16">
+                            <ComboBoxItem Content="{t:T 'White'}" Tag="White" />
+                            <ComboBoxItem Content="{t:T 'Yellow'}" Tag="Yellow" />
+                        </ComboBox>
                         <Button Content="{t:T 'Send test subtitle'}" Click="OnTest" />
                     </StackPanel>
                 </c:Card>

@@ -70,6 +70,10 @@ struct SettingsView: View {
                             if editing { model.sendTestSubtitle() }
                         }
                         Toggle("Bold text", isOn: $model.settings.style.bold)
+                        Picker("Text color", selection: $model.settings.style.textColor) {
+                            Text("White").tag(SubtitleTextColor.white)
+                            Text("Yellow").tag(SubtitleTextColor.yellow)
+                        }
                         Button("Send test subtitle") { model.sendTestSubtitle() }.buttonStyle(.secondary)
                     }
                     DubbingCard()

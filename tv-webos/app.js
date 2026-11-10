@@ -381,6 +381,9 @@
     cover.className = 'hidden';
   }
 
+  // Bilgisayardaki "Yazı rengi" seçimi; bilinmeyen değer gelirse renk değişmez.
+  var TEXT_COLORS = { white: '#FFFFFF', yellow: '#FFE135' };
+
   function applyStyle(style) {
     if (style.fontSize) {
       $('subtitle-text').style.fontSize = style.fontSize + 'px';
@@ -398,6 +401,11 @@
       $('subtitle-text').style.fontWeight = style.bold ? '700' : '600';
       $('subtitle-prev-text').style.fontWeight = style.bold ? '700' : '600';
       $('subtitle-prev2-text').style.fontWeight = style.bold ? '700' : '600';
+    }
+    if (TEXT_COLORS[style.textColor]) {
+      $('subtitle-text').style.color = TEXT_COLORS[style.textColor];
+      $('subtitle-prev-text').style.color = TEXT_COLORS[style.textColor];
+      $('subtitle-prev2-text').style.color = TEXT_COLORS[style.textColor];
     }
     layout();
     if (style.bottomPercent >= 0 && String(style.bottomPercent) !== load('appBottom')) {

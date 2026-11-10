@@ -126,7 +126,7 @@ public class SubtitleServerTests
     {
         using var server = new SubtitleServer(0);
         var port = await server.StartAsync();
-        server.SendStyle(new SubtitleStyle(58, 10, SubtitlePlacement.Above, 40, true));
+        server.SendStyle(new SubtitleStyle(58, 10, SubtitlePlacement.Above, 40, true, SubtitleTextColor.Yellow));
 
         using var response = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
         using var reader = new StreamReader(await response.Content.ReadAsStreamAsync());
@@ -138,6 +138,7 @@ public class SubtitleServerTests
         Assert.Contains("\"placement\":\"above\"", data);
         Assert.Contains("\"background\":40", data);
         Assert.Contains("\"bold\":true", data);
+        Assert.Contains("\"textColor\":\"yellow\"", data);
     }
 
     [Fact]
