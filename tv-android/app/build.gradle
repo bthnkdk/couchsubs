@@ -8,8 +8,8 @@ android {
         applicationId 'com.couchsubs.tv'
         minSdk 24
         targetSdk 35
-        versionCode 13
-        versionName '0.9.10'
+        versionCode 14
+        versionName '0.9.11'
     }
     // Sürümde imza depo sırrından gelir; yoksa geliştirme anahtarıyla imzalanır.
     signingConfigs {
