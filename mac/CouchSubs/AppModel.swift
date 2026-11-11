@@ -163,6 +163,8 @@ extension AppServices {
 }
 
 protocol AppServices: AnyObject {
+    /// Yapay zekâ anahtarını örnek bir satırı çevirerek dener (varsayılanı yukarıda; testlerde sahtesi).
+    func testAIKey(provider: AIProvider, key: String, model: String?) async -> Result<String, AIFailure>
     func discoverConsoles() async -> [ConsoleInfo]
     func accountId(fromRedirect url: URL) async throws -> Data
     func register(host: String, accountId: Data, pin: UInt32) async throws -> RegisteredConsole
@@ -434,7 +436,8 @@ enum TVAppState: Equatable {
 @Observable
 final class AppModel {
     enum Step: Int, CaseIterable {
-        case welcome, secondAccount, psnLogin, console, tv, test, done
+        /// `betterTranslation`: isteğe bağlı ücretsiz Gemini anahtarı; atlanabilir.
+        case welcome, secondAccount, psnLogin, console, tv, test, betterTranslation, done
     }
 
     var step: Step
@@ -540,7 +543,7 @@ final class AppModel {
 
     var canAdvance: Bool {
         switch step {
-        case .welcome, .secondAccount, .test: true
+        case .welcome, .secondAccount, .test, .betterTranslation: true
         case .psnLogin: accountId != nil
         case .console: console != nil
         case .tv: tv != nil && store.load(String.self, for: StoreKey.tvKey) != nil
@@ -557,6 +560,12 @@ final class AppModel {
         guard let previous = Step(rawValue: step.rawValue - 1) else { return }
         step = previous
     }
+
+    /// Ücretsiz Gemini anahtarı kayıtlı ve çeviri Gemini ile yapılıyor ("Daha iyi çeviri" adımı tamam).
+    var usesFreeGemini: Bool { settings.translationEngine == .gemini && hasKey(.gemini) }
+
+    /// Ayarlardaki "Ücretsiz anahtar al": Gemini seçilir, anahtar alanı görünür (anahtar gelene dek ücretsiz çeviri sürer).
+    func chooseFreeGemini() { settings.translationEngine = .gemini }
 
     func completePSNLogin(redirect: URL) async throws {
         let id = try await services.accountId(fromRedirect: redirect)

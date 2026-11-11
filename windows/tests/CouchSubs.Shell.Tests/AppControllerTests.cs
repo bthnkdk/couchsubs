@@ -382,9 +382,95 @@ public class AppControllerTests
         await controller.PairAsync(new LgTv("LG TV", "192.168.1.153")); controller.Advance();
         Assert.Equal(OnboardingStep.Translation, controller.Step); controller.Advance();
         Assert.Equal(OnboardingStep.Test, controller.Step); controller.Advance();
+        Assert.Equal(OnboardingStep.BetterTranslation, controller.Step);
+        Assert.True(controller.CanAdvance);
+        controller.Advance();
         Assert.Equal(OnboardingStep.Done, controller.Step);
         controller.Dispose();
     }
+
+    /// <summary>"Daha iyi çeviri" adımı isteğe bağlıdır: geçilirse ücretsiz çeviri kalır; anahtar kabul edilirse Gemini seçilir.</summary>
+    [Fact]
+    public void BetterTranslationStepCanBeSkipped()
+    {
+        var controller = Make();
+        controller.Step = OnboardingStep.BetterTranslation;
+        Assert.False(controller.UsesFreeGemini);
+        Assert.True(controller.CanAdvance);
+        controller.Advance();
+        Assert.Equal(OnboardingStep.Done, controller.Step);
+        Assert.Equal(TranslationEngine.Free, controller.Settings.Engine);
+        controller.Back();
+        Assert.Equal(OnboardingStep.BetterTranslation, controller.Step);
+        controller.Back();
+        Assert.Equal(OnboardingStep.Test, controller.Step);
+    }
+
+    [Fact]
+    public async Task BetterTranslationStepSavesTheKeyAndSelectsGemini()
+    {
+        var services = new FakeServices();
+        var store = new MemoryStore();
+        var controller = Make(services, store);
+        controller.Step = OnboardingStep.BetterTranslation;
+        var changed = new List<string?>();
+        controller.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+        var result = await controller.SetAiKeyAsync(AiProvider.Gemini, "  AIza-free  ");
+        Assert.Equal(OnlineKeyState.Valid, result.State);
+        // Ücretsiz katmandaki varsayılan model denenir.
+        Assert.Equal((AiProvider.Gemini, "AIza-free", AiProvider.Gemini.DefaultModel().Id), Assert.Single(services.AiTests));
+        Assert.True(AiProvider.Gemini.DefaultModel().FreeTier);
+        Assert.Equal("AIza-free", store.Load<string>(StoreKeys.GeminiKey));
+        Assert.Equal(TranslationEngine.Gemini, controller.Settings.Engine);
+        Assert.True(controller.UsesFreeGemini);
+        // Alttaki düğme "Şimdilik geç"ten "Devam"a döner.
+        Assert.Contains(nameof(AppController.UsesFreeGemini), changed);
+        controller.Advance();
+        Assert.Equal(OnboardingStep.Done, controller.Step);
+    }
+
+    /// <summary>Yanlış anahtar kaydedilmez, motor değişmez; dakikalık sınıra takılan anahtar geçerlidir ve kaydedilir.</summary>
+    [Fact]
+    public async Task BetterTranslationStepRejectsAWrongKey()
+    {
+        var services = new FakeServices { AiTest = new AiTestResult(OnlineKeyState.Invalid) };
+        var controller = Make(services);
+        controller.Step = OnboardingStep.BetterTranslation;
+        Assert.Equal(OnlineKeyState.Invalid, (await controller.SetAiKeyAsync(AiProvider.Gemini, "wrong")).State);
+        Assert.False(controller.HasKey(TranslationEngine.Gemini));
+        Assert.Equal(TranslationEngine.Free, controller.Settings.Engine);
+        Assert.False(controller.UsesFreeGemini);
+
+        services.AiTest = new AiTestResult(OnlineKeyState.QuotaExceeded);
+        await controller.SetAiKeyAsync(AiProvider.Gemini, "AIza-busy");
+        Assert.True(controller.UsesFreeGemini);
+    }
+
+    /// <summary>Ayarlardaki "Ücretsiz anahtar al" Gemini'yi seçer; anahtar gelene dek ücretsiz çeviri sürer.</summary>
+    [Fact]
+    public void ChooseFreeGeminiSelectsGeminiWithoutAKey()
+    {
+        var controller = Make();
+        controller.ChooseFreeGemini();
+        Assert.Equal(TranslationEngine.Gemini, controller.Settings.Engine);
+        Assert.False(controller.OnlineTranslationActive);
+        Assert.False(controller.UsesFreeGemini);
+    }
+
+    /// <summary>Yeni metinler ortak metin dosyasında Türkçesiyle durur.</summary>
+    [Theory]
+    [InlineData("Better translation (free)")]
+    [InlineData("Get a free key")]
+    [InlineData("Skip for now")]
+    [InlineData("For better translation, get a free Gemini key.")]
+    [InlineData("Gemini is ready. Subtitles will be translated with Gemini.")]
+    [InlineData("Press Get a free key and sign in with your Google account.")]
+    [InlineData("Press Create API key and copy the key.")]
+    [InlineData("Paste the key here and press Save and test.")]
+    [InlineData("The free translation works without the internet but often sounds stiff. Google's Gemini translates much more naturally, and a free Google key is enough.")]
+    [InlineData("Subtitle text is sent to Google. With a free key, Google may use it to improve its products, and people at Google may read it. Only the game's subtitles are sent.")]
+    [InlineData("The free key has a per-minute limit. When it is reached, that line is translated by the free translation.")]
+    public void FreeGeminiStringsAreTranslated(string key) => Assert.NotEqual(key, Localizer.ForLanguage("tr")[key]);
 }
 
 public class AppControllerRunTests

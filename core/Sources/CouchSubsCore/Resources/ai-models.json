@@ -1,8 +1,8 @@
 {
-  "_comment": "Yapay zekâ çevirisinde seçilebilen modeller; Mac (CouchSubsCore) ve Windows (CouchSubs.Core, gömülü kaynak) bu tek dosyayı okur. İlk model varsayılandır. label: Localizable.xcstrings anahtarı. effort: OpenAI reasoning_effort / Claude output_config.effort. thinking: Gemini thinkingConfig.thinkingLevel / Claude thinking.type. Kasım 2026'da belgelerden denetlendi: aistudio.google.com/docs/models ve /docs/thinking, developers.openai.com/api/docs/models, platform.claude.com/docs/en/about-claude/models/overview ve /docs/en/build-with-claude/effort.",
+  "_comment": "Yapay zekâ çevirisinde seçilebilen modeller; Mac (CouchSubsCore) ve Windows (CouchSubs.Core, gömülü kaynak) bu tek dosyayı okur. İlk model varsayılandır. label: Localizable.xcstrings anahtarı. effort: OpenAI reasoning_effort / Claude output_config.effort. thinking: Gemini thinkingConfig.thinkingLevel / Claude thinking.type. freeTier: ücretsiz anahtarla kullanılabilir (aistudio.google.com/docs/pricing: 'Free Tier: Free of charge'; ücretsiz katmanda 'Used to improve our products: Yes'). requestsPerMinute: uygulamanın dakikada gönderdiği en çok istek; Google ücretsiz katmanın model başına sayısını belgelerde yayımlamıyor (aistudio.google.com/docs/rate-limits; sınır proje başına, günlük sınır gece yarısı Pasifik saatinde sıfırlanır), değer temkinli seçildi. Kasım 2026'da belgelerden denetlendi: aistudio.google.com/docs/models, /docs/thinking, /docs/pricing, /docs/rate-limits, developers.openai.com/api/docs/models, platform.claude.com/docs/en/about-claude/models/overview ve /docs/en/build-with-claude/effort.",
   "gemini": [
-    { "id": "gemini-3.5-flash-lite", "label": "Fast and cheap (recommended)" },
-    { "id": "gemini-3.6-flash", "label": "Better quality, a little slower", "thinking": "LOW" }
+    { "id": "gemini-3.5-flash-lite", "label": "Fast and cheap (recommended)", "freeTier": true, "requestsPerMinute": 15 },
+    { "id": "gemini-3.6-flash", "label": "Better quality, a little slower", "thinking": "LOW", "freeTier": true, "requestsPerMinute": 10 }
   ],
   "openai": [
     { "id": "gpt-6-luna", "label": "Fast and cheap (recommended)", "effort": "none" },

@@ -149,6 +149,7 @@ struct SettingsView: View {
 /// (Windows'taki ayarlarla aynı düzen).
 struct TranslationCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         @Bindable var model = model
@@ -166,10 +167,25 @@ struct TranslationCard: View {
                 HintText(text: "Online engines translate English games only. For other game languages the free translation is used.")
             }
             switch engine {
-            case .free: EmptyView()
+            case .free:
+                // Ücretsiz çeviri zayıf kalıyor; ücretsiz Gemini anahtarı en kolay iyileştirme.
+                HStack(spacing: Theme.space("m")) {
+                    Text("For better translation, get a free Gemini key.")
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Get a free key") {
+                        model.chooseFreeGemini()
+                        openURL(AIProvider.gemini.keyPage)
+                    }
+                    .buttonStyle(.secondary)
+                }
             case .deepL: DeepLKeySection()
             case .gemini, .openAI, .claude:
                 if let provider = engine.aiProvider { AIKeySection(provider: provider).id(provider) }
+            }
+            if engine == .gemini {
+                HintText(text: FreeGemini.privacy)
+                HintText(text: FreeGemini.limit)
             }
         }
     }

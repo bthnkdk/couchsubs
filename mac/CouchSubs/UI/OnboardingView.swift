@@ -32,7 +32,8 @@ struct OnboardingView: View {
                     case .psnLogin: PSNLoginStep()
                     case .console: ConsoleStep()
                     case .tv: TVStep()
-                    case .test, .done: TestStep()
+                    case .test: TestStep()
+                    case .betterTranslation, .done: BetterTranslationStep()
                     }
                 }
                 .padding(Theme.space("xxl"))
@@ -44,7 +45,11 @@ struct OnboardingView: View {
                     Button("Back") { model.back() }.buttonStyle(.secondary)
                 }
                 Spacer()
-                if model.step != .test {
+                if model.step == .betterTranslation && !model.usesFreeGemini {
+                    // İsteğe bağlı adım: anahtar yoksa geçilir (birincil düğme adımdaki "Ücretsiz anahtar al").
+                    Button("Skip for now") { model.advance() }
+                        .buttonStyle(.secondary)
+                } else if model.step != .test {
                     Button("Continue") { model.advance() }
                         .buttonStyle(.primary)
                         .keyboardShortcut(.defaultAction)

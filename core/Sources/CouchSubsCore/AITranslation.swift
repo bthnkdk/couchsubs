@@ -39,6 +39,9 @@ public enum AIProvider: String, Codable, CaseIterable, Sendable {
     public func model(_ id: String?) -> AIModel {
         models.first { $0.id == id } ?? defaultModel
     }
+
+    /// Ücretsiz anahtarla kullanılabilen bir modeli var mı (bugün yalnız Gemini).
+    public var hasFreeTier: Bool { models.contains(where: \.freeTier) }
 }
 
 /// Listedeki bir model ve onunla gönderilen ayarlar. Kullanıcı model adı yazamaz; yalnız bu listeden seçer.
@@ -50,12 +53,34 @@ public struct AIModel: Codable, Equatable, Sendable {
     public var effort: String?
     /// Gemini'de `thinkingConfig.thinkingLevel`, Claude'da `thinking.type`; nil ise gönderilmez.
     public var thinking: String?
+    /// Ücretsiz anahtarla (faturası bağlanmamış Google projesi) kullanılabilir mi: Kasım 2026'da
+    /// aistudio.google.com/docs/pricing sayfasında "Free Tier: Free of charge" yazan modeller.
+    public var freeTier: Bool
+    /// Dakikada en çok bu kadar istek gönderilir; hak bitince o satır yerel çeviriyle çevrilir. nil ise sınır yok.
+    /// Google ücretsiz katmanın model başına sayılarını belgelerde yazmıyor (aistudio.google.com/docs/rate-limits:
+    /// "Rate limits are applied per project, not per API key"; sayılar yalnız aistudio.google.com/rate-limit'te).
+    /// Değer temkinli seçildi; hizmet 429 ile daha düşük sınır bildirirse o sınıra inilir.
+    public var requestsPerMinute: Int?
 
-    public init(id: String, label: String, effort: String? = nil, thinking: String? = nil) {
+    public init(id: String, label: String, effort: String? = nil, thinking: String? = nil, freeTier: Bool = false,
+                requestsPerMinute: Int? = nil) {
         self.id = id
         self.label = label
         self.effort = effort
         self.thinking = thinking
+        self.freeTier = freeTier
+        self.requestsPerMinute = requestsPerMinute
+    }
+
+    /// Yeni alanlar eksikse varsayılanla okunur.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        label = try values.decode(String.self, forKey: .label)
+        effort = try values.decodeIfPresent(String.self, forKey: .effort)
+        thinking = try values.decodeIfPresent(String.self, forKey: .thinking)
+        freeTier = try values.decodeIfPresent(Bool.self, forKey: .freeTier) ?? false
+        requestsPerMinute = try values.decodeIfPresent(Int.self, forKey: .requestsPerMinute)
     }
 
     /// `ai-models.json`: hizmet adı → modeller.
@@ -88,6 +113,25 @@ public enum AIFailure: Error, Equatable, Sendable {
     case modelRejected
     /// Ağ hatası, zaman aşımı, hizmet arızası ya da anlaşılmayan yanıt.
     case unreachable
+}
+
+/// Hizmetin bildirdiği dakikalık istek sınırı aşımı (429). Gün sınırından farklı olarak kısa sürer; kullanıcıya hata
+/// gösterilmez, birkaç saniye o satırlar yerel çeviriyle çevrilir.
+public struct AIRateLimit: Equatable, Sendable {
+    /// Hizmetin önerdiği bekleme ("retryDelay"); yoksa nil.
+    public var retryAfter: TimeInterval?
+    /// Hizmetin bildirdiği dakikalık istek sınırı ("quotaValue"); yoksa nil.
+    public var requestsPerMinute: Int?
+
+    public init(retryAfter: TimeInterval? = nil, requestsPerMinute: Int? = nil) {
+        self.retryAfter = retryAfter
+        self.requestsPerMinute = requestsPerMinute
+    }
+}
+
+/// Hizmet dakikalık sınırın aşıldığını bildirdi; kullanıcıya hata olarak gösterilmez.
+struct AIRateLimited: Error {
+    let limit: AIRateLimit
 }
 
 /// Bağlam olarak giden, daha önce gösterilmiş satır ve (biliniyorsa) çevirisi.
@@ -242,22 +286,52 @@ public enum AIRequest {
         default: return .unreachable
         }
     }
+
+    /// 429 yalnız dakikalık sınırdan geldiyse onun ayrıntısı; gün sınırı, bakiye ya da tanınmayan 429 için nil (bunlar
+    /// `quotaExceeded` olarak kullanıcıya gösterilir). Gemini'nin hata gövdesinde error.details[] içinde
+    /// google.rpc.QuotaFailure (violations[].quotaId, ör. "GenerateRequestsPerMinutePerProjectPerModel-FreeTier",
+    /// quotaValue "15") ve google.rpc.RetryInfo (retryDelay "37s") bulunur.
+    public static func rateLimit(status: Int, body: Data) -> AIRateLimit? {
+        guard status == 429,
+              let root = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+              let details = (root["error"] as? [String: Any])?["details"] as? [[String: Any]] else { return nil }
+        let violations = details.flatMap { $0["violations"] as? [[String: Any]] ?? [] }
+        let ids = violations.compactMap { $0["quotaId"] as? String }
+        // Günlük sınır doldu: dakikalık beklemeyle geçmez, kullanıcı bilmeli.
+        guard !ids.contains(where: { $0.contains("PerDay") }), ids.contains(where: { $0.contains("PerMinute") }) else { return nil }
+        var limit = AIRateLimit()
+        if let delay = details.compactMap({ $0["retryDelay"] as? String }).first,
+           let seconds = TimeInterval(delay.trimmingCharacters(in: CharacterSet(charactersIn: "s"))) {
+            limit.retryAfter = seconds
+        }
+        // İstek sınırı (token sınırı değil).
+        if let requests = violations.first(where: { ($0["quotaId"] as? String)?.contains("Requests") == true }) {
+            let value = requests["quotaValue"] as? String ?? (requests["quotaValue"] as? Int).map(String.init)
+            if let number = value.flatMap(Int.init), number > 0 { limit.requestsPerMinute = number }
+        }
+        return limit
+    }
 }
 
 /// Yapay zekâ çevirisinin ortak çekirdeği: önbellek, bağlam, cümle bölme, hata sonrası bekleme ve yerel çeviriye düşme.
 /// Uygulamadaki `AITranslator` bunu çeviri protokolüne bağlar. Hata olursa o satır yerel (ücretsiz) motorla çevrilir ve
 /// bir dakika hizmet denenmez; her satırda zaman aşımı beklenmez. Yerel çeviriler bu motorun önbelleğine yazılmaz.
+/// Bir altyazının çevrilmemiş bütün cümleleri tek istekte gider. Ücretsiz katmanın dakikalık sınırı için model listesindeki
+/// `requestsPerMinute` kadar istek hakkı vardır; hak bitince o satır sessizce (hata göstermeden) yerel çeviriyle çevrilir.
 public final class AITranslationCore: @unchecked Sendable {
     /// Bağlama giden önceki satır sayısı.
     public static let contextLines = 3
     /// Hata sonrası bu süre hizmet denenmez.
     public static let retryAfter: TimeInterval = 60
+    /// Dakikalık sınır aşılınca en çok bu kadar beklenir (hizmet bekleme önermezse de bu kadar).
+    public static let rateLimitPause: TimeInterval = 20
 
     public let provider: AIProvider
     public let model: AIModel
     private let key: String
     private let session: URLSession
     private let cache: TranslationCache
+    private let budget: RequestBudget?
     private let names = SpeakerNames()
     private let lock = NSLock()
     private var speech: [String: [SpokenLine]] = [:]
@@ -265,19 +339,26 @@ public final class AITranslationCore: @unchecked Sendable {
     private var recent: [AIContextLine] = []
     private var pausedUntil = Date.distantPast
     private var failure: AIFailure?
+    private var rateLimited = false
 
     /// Son hata; çeviri düzgün gidiyorsa nil. Değiştikçe `onFailureChanged` çağrılır.
     public var lastFailure: AIFailure? { lock.withLock { failure } }
     public var onFailureChanged: ((AIFailure?) -> Void)?
+    /// Son satır dakikalık sınır yüzünden yerel çeviriyle çevrildi (hata sayılmaz, bildirilmez).
+    public var lastLineWasRateLimited: Bool { lock.withLock { rateLimited } }
 
     /// `model`: kayıtlı model kimliği; listede yoksa varsayılan model.
+    /// `budget`: dakikalık istek hakkı; nil ise modelin uygulama genelindeki ortak hakkı (Google sınırı proje ve model başına
+    /// sayar; çeviri hattı yeniden kurulsa da hak sıfırlanmaz). Modelin sınırı yoksa hak da yoktur.
     public init(provider: AIProvider, key: String, model: String? = nil, session: URLSession = AITranslationCore.makeSession(),
-                cache: TranslationCache = TranslationCache()) {
+                cache: TranslationCache = TranslationCache(), budget: RequestBudget? = nil) {
         self.provider = provider
         self.key = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.model = provider.model(model)
+        let resolved = provider.model(model)
+        self.model = resolved
         self.session = session
         self.cache = cache
+        self.budget = budget ?? RequestBudget.shared(provider: provider, model: resolved)
     }
 
     /// Kısa zaman aşımı: altyazı birkaç saniye ekranda kalır, geç gelen çeviri işe yaramaz.
@@ -299,6 +380,10 @@ public final class AITranslationCore: @unchecked Sendable {
         var translations: [String?] = pieces.map { $0.translate ? cache.value(for: $0.text) : nil }
         let missing = pieces.indices.filter { pieces[$0].translate && translations[$0] == nil }
         let sources = missing.map { SubtitleSegmenter.normalizeCase(pieces[$0].text, names: names.all) }
+        // Dakikalık hak bittiyse istek gönderilmez; satır sessizce yerel çeviriyle çevrilir (hata değildir).
+        let allowed = sources.isEmpty || budget?.take() != false
+        lock.withLock { rateLimited = !allowed }
+        guard allowed else { return remember(try await fallback(text), for: text) }
         let translated: [String]
         do {
             translated = sources.isEmpty ? [] : try await request(sources, context: context)
@@ -307,6 +392,15 @@ public final class AITranslationCore: @unchecked Sendable {
             throw CancellationError()
         } catch let error as URLError where error.code == .cancelled && Task.isCancelled {
             throw CancellationError()
+        } catch let error as AIRateLimited {
+            // Dakikalık sınır: kısa beklenir, ana ekranda uyarı çıkmaz; hizmet daha düşük sınır bildirdiyse ona inilir.
+            if let perMinute = error.limit.requestsPerMinute { budget?.lower(to: perMinute) }
+            let pause = max(1, min(error.limit.retryAfter ?? Self.rateLimitPause, Self.rateLimitPause))
+            lock.withLock {
+                rateLimited = true
+                pausedUntil = Date().addingTimeInterval(pause)
+            }
+            return remember(try await fallback(text), for: text)
         } catch {
             setFailure(error as? AIFailure ?? .unreachable)
             lock.withLock { pausedUntil = Date().addingTimeInterval(Self.retryAfter) }
@@ -375,6 +469,7 @@ public final class AITranslationCore: @unchecked Sendable {
             throw AIFailure.unreachable
         }
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            if let limit = AIRequest.rateLimit(status: http.statusCode, body: data) { throw AIRateLimited(limit: limit) }
             throw AIRequest.failure(status: http.statusCode, body: data)
         }
         return try AIRequest.translations(from: AIRequest.text(provider: provider, from: data), count: count)
@@ -385,9 +480,14 @@ public final class AITranslationCore: @unchecked Sendable {
                             session: URLSession = makeSession()) async -> Result<String, AIFailure> {
         let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !key.isEmpty else { return .failure(.invalidKey) }
-        let translator = AITranslationCore(provider: provider, key: key, model: model, session: session)
+        // Deneme tek istektir; çeviri hattının dakikalık hakkından yemez.
+        let translator = AITranslationCore(provider: provider, key: key, model: model, session: session,
+                                           budget: RequestBudget(perMinute: .max))
         do {
-            let result = try await translator.translate(sample) { _ in throw translator.lastFailure ?? AIFailure.unreachable }
+            let result = try await translator.translate(sample) { _ in
+                // Dakikalık sınıra takıldıysa anahtar geçerlidir ama şu an sınırdadır.
+                throw translator.lastFailure ?? (translator.lastLineWasRateLimited ? AIFailure.quotaExceeded : AIFailure.unreachable)
+            }
             return .success(result)
         } catch {
             return .failure(error as? AIFailure ?? .unreachable)

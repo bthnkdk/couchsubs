@@ -200,6 +200,61 @@ public static class AiRequest
             _ => OnlineKeyState.Unreachable,
         };
     }
+
+    /// <summary>
+    /// 429 yalnız dakikalık sınırdan geldiyse onun ayrıntısı; gün sınırı, bakiye ya da tanınmayan 429 için null (bunlar
+    /// <see cref="OnlineKeyState.QuotaExceeded"/> olarak kullanıcıya gösterilir). Gemini'nin hata gövdesinde error.details[]
+    /// içinde google.rpc.QuotaFailure (violations[].quotaId, ör. "GenerateRequestsPerMinutePerProjectPerModel-FreeTier",
+    /// quotaValue "15") ve google.rpc.RetryInfo (retryDelay "37s") bulunur.
+    /// </summary>
+    public static AiRateLimit? RateLimit(HttpStatusCode status, string body)
+    {
+        if ((int)status != 429) return null;
+        JsonArray? details;
+        try { details = JsonNode.Parse(body)?["error"]?["details"] as JsonArray; }
+        catch (JsonException) { return null; }
+        if (details is null) return null;
+        try
+        {
+            var violations = details.SelectMany(d => d?["violations"] as IEnumerable<JsonNode?> ?? []).OfType<JsonNode>().ToList();
+            var ids = violations.Select(v => v["quotaId"]?.GetValueKind() == JsonValueKind.String ? v["quotaId"]!.GetValue<string>() : null)
+                .OfType<string>().ToList();
+            // Günlük sınır doldu: dakikalık beklemeyle geçmez, kullanıcı bilmeli.
+            if (ids.Any(id => id.Contains("PerDay", StringComparison.Ordinal)) || !ids.Any(id => id.Contains("PerMinute", StringComparison.Ordinal)))
+                return null;
+            TimeSpan? retry = null;
+            var delay = details.Select(d => d?["retryDelay"]).FirstOrDefault(n => n?.GetValueKind() == JsonValueKind.String)?.GetValue<string>();
+            if (delay is not null && double.TryParse(delay.TrimEnd('s'), System.Globalization.NumberStyles.Float,
+                                                     System.Globalization.CultureInfo.InvariantCulture, out var seconds))
+                retry = TimeSpan.FromSeconds(seconds);
+            // İstek sınırı (token sınırı değil).
+            int? perMinute = null;
+            var requests = violations.FirstOrDefault(v => v["quotaId"]?.GetValueKind() == JsonValueKind.String
+                                                          && v["quotaId"]!.GetValue<string>().Contains("Requests", StringComparison.Ordinal));
+            var value = requests?["quotaValue"];
+            if (value?.GetValueKind() == JsonValueKind.String && int.TryParse(value.GetValue<string>(), out var parsed) && parsed > 0) perMinute = parsed;
+            else if (value?.GetValueKind() == JsonValueKind.Number && value.GetValue<int>() > 0) perMinute = value.GetValue<int>();
+            return new AiRateLimit(retry, perMinute);
+        }
+        catch (Exception error) when (error is InvalidOperationException or FormatException)
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>
+/// Hizmetin bildirdiği dakikalık istek sınırı aşımı (429). Gün sınırından farklı olarak kısa sürer; kullanıcıya hata
+/// gösterilmez, birkaç saniye o satırlar yerel çeviriyle çevrilir.
+/// </summary>
+/// <param name="RetryAfter">Hizmetin önerdiği bekleme ("retryDelay"); yoksa null.</param>
+/// <param name="RequestsPerMinute">Hizmetin bildirdiği dakikalık istek sınırı ("quotaValue"); yoksa null.</param>
+public sealed record AiRateLimit(TimeSpan? RetryAfter = null, int? RequestsPerMinute = null);
+
+/// <summary>Hizmet dakikalık sınırın aşıldığını bildirdi; kullanıcıya hata olarak gösterilmez.</summary>
+internal sealed class AiRateLimitedException(AiRateLimit limit) : Exception("AI translation rate limited")
+{
+    public AiRateLimit Limit { get; } = limit;
 }
 
 /// <summary>
@@ -207,6 +262,8 @@ public static class AiRequest
 /// AITranslationCore ile aynı). Altyazı cümle cümle, konuşmacı adları çevrilmeden gönderilir; son gösterilen 3 satır ve
 /// çevirileri bağlam olarak eklenir. Hizmete ulaşılamazsa, kota biterse ya da zaman aşımı olursa o satır cihaz üstü
 /// modelle çevrilir ve bir dakika hizmet denenmez. Yerel çeviriler bu motorun önbelleğine yazılmaz.
+/// Bir altyazının çevrilmemiş bütün cümleleri tek istekte gider. Ücretsiz katmanın dakikalık sınırı için model listesindeki
+/// <c>requestsPerMinute</c> kadar istek hakkı vardır; hak bitince o satır sessizce (hata göstermeden) yerel çeviriyle çevrilir.
 /// </summary>
 public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
 {
@@ -214,6 +271,8 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     internal const int ContextLines = 3;
     /// <summary>Hata sonrası bu süre hizmet denenmez.</summary>
     private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(1);
+    /// <summary>Dakikalık sınır aşılınca en çok bu kadar beklenir (hizmet bekleme önermezse de bu kadar).</summary>
+    public static readonly TimeSpan RateLimitPause = TimeSpan.FromSeconds(20);
     /// <summary>Denemede çevrilen örnek satır.</summary>
     public const string Sample = "KRATOS: We go now. Stay close, boy.";
 
@@ -224,6 +283,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     private readonly ITextTranslator? _fallback;
     private readonly HttpClient _http;
     private readonly TranslationCache _cache;
+    private readonly RequestBudget? _budget;
     private readonly ConcurrentDictionary<string, IReadOnlyList<SpokenLine>> _speech = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, byte> _names = new(StringComparer.Ordinal);
     private readonly List<AiContextLine> _recent = [];
@@ -232,8 +292,12 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
 
     /// <param name="model">Kayıtlı model kimliği; listede yoksa varsayılan model.</param>
     /// <param name="cache">Kalıcı önbellek; verilmezse yalnız bellekte tutulur.</param>
+    /// <param name="budget">
+    /// Dakikalık istek hakkı; null ise modelin uygulama genelindeki ortak hakkı (Google sınırı proje ve model başına sayar;
+    /// çeviri hattı yeniden kurulsa da hak sıfırlanmaz). Modelin sınırı yoksa hak da yoktur.
+    /// </param>
     public AiTranslator(AiProvider provider, string key, string? model, ITextTranslator? fallback, HttpClient? http = null,
-                        TranslationCache? cache = null)
+                        TranslationCache? cache = null, RequestBudget? budget = null)
     {
         Provider = provider;
         Model = provider.Model(model);
@@ -241,6 +305,7 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         _fallback = fallback;
         _http = http ?? SharedClient.Value;
         _cache = cache ?? new TranslationCache();
+        _budget = budget ?? RequestBudget.Shared(provider, Model);
     }
 
     public AiProvider Provider { get; }
@@ -248,6 +313,9 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
 
     /// <summary>Son hata; çeviri düzgün gidiyorsa null.</summary>
     public OnlineKeyState? LastError => _failure;
+
+    /// <summary>Son satır dakikalık sınır yüzünden yerel çeviriyle çevrildi (hata sayılmaz, bildirilmez).</summary>
+    public bool LastLineWasRateLimited { get; private set; }
 
     public event Action<OnlineKeyState?>? FailureChanged;
 
@@ -269,12 +337,25 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         var translations = pieces.Select(p => p.Translate && _cache.TryGet(p.Text, out var known) ? known : null).ToList();
         var missing = Enumerable.Range(0, pieces.Count).Where(i => pieces[i].Translate && translations[i] is null).ToList();
         var sources = missing.Select(i => SubtitleSegmenter.NormalizeCase(pieces[i].Text, names)).ToList();
+        // Dakikalık hak bittiyse istek gönderilmez; satır sessizce yerel çeviriyle çevrilir (hata değildir).
+        LastLineWasRateLimited = sources.Count > 0 && _budget is { } budget && !budget.TryTake();
+        if (LastLineWasRateLimited) return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text);
 
         string[] translated;
         try
         {
             translated = sources.Count == 0 ? [] : await RequestAsync(sources, context, cancellationToken).ConfigureAwait(false);
             Report(null);
+        }
+        catch (AiRateLimitedException limited) when (!cancellationToken.IsCancellationRequested)
+        {
+            // Dakikalık sınır: kısa beklenir, ana ekranda uyarı çıkmaz; hizmet daha düşük sınır bildirdiyse ona inilir.
+            if (limited.Limit.RequestsPerMinute is { } perMinute) _budget?.Lower(perMinute);
+            var pause = limited.Limit.RetryAfter is { } retry && retry < RateLimitPause ? retry : RateLimitPause;
+            if (pause < TimeSpan.FromSeconds(1)) pause = TimeSpan.FromSeconds(1);
+            LastLineWasRateLimited = true;
+            _pausedUntil = DateTimeOffset.UtcNow + pause;
+            return Remember(await FallbackAsync(text, cancellationToken).ConfigureAwait(false), text);
         }
         catch (Exception error) when (error is HttpRequestException or TaskCanceledException or AiException
                                       && !cancellationToken.IsCancellationRequested)
@@ -346,7 +427,11 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
         using var request = AiRequest.Build(Provider, _key, Model, sentences, context);
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) throw new AiException(AiRequest.Failure(response.StatusCode, body));
+        if (!response.IsSuccessStatusCode)
+        {
+            if (AiRequest.RateLimit(response.StatusCode, body) is { } limit) throw new AiRateLimitedException(limit);
+            throw new AiException(AiRequest.Failure(response.StatusCode, body));
+        }
         return AiRequest.Translations(AiRequest.Text(Provider, body), sentences.Count);
     }
 
@@ -356,14 +441,16 @@ public sealed class AiTranslator : ITextTranslator, IOnlineTranslator
     {
         key = key.Trim();
         if (key.Length == 0) return new(OnlineKeyState.Invalid);
-        var translator = new AiTranslator(provider, key, model, new FailingTranslator(), http);
+        // Deneme tek istektir; çeviri hattının dakikalık hakkından yemez.
+        var translator = new AiTranslator(provider, key, model, new FailingTranslator(), http, budget: new RequestBudget(int.MaxValue));
         try
         {
             return new(OnlineKeyState.Valid, await translator.TranslateAsync(Sample, cancellationToken).ConfigureAwait(false));
         }
         catch (FailedException)
         {
-            return new(translator.LastError ?? OnlineKeyState.Unreachable);
+            // Dakikalık sınıra takıldıysa anahtar geçerlidir ama şu an sınırdadır.
+            return new(translator.LastError ?? (translator.LastLineWasRateLimited ? OnlineKeyState.QuotaExceeded : OnlineKeyState.Unreachable));
         }
     }
 
