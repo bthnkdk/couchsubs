@@ -70,6 +70,8 @@ public partial class SettingsWindow : Window
         }];
         EnglishOnlyHint.Visibility = engine != TranslationEngine.Free && controller.Settings.SourceLanguage != "en" ? Visibility.Visible : Visibility.Collapsed;
         KeyPanel.Visibility = engine == TranslationEngine.Free ? Visibility.Collapsed : Visibility.Visible;
+        FreeGeminiOffer.Visibility = engine == TranslationEngine.Free ? Visibility.Visible : Visibility.Collapsed;
+        FreeGeminiNotes.Visibility = engine == TranslationEngine.Gemini ? Visibility.Visible : Visibility.Collapsed;
         KeyStatus.Visibility = Visibility.Collapsed;
         KeyError.Visibility = Visibility.Collapsed;
         if (engine == TranslationEngine.Free) return;
@@ -192,6 +194,17 @@ public partial class SettingsWindow : Window
     {
         if (loading || SelectedEngine.Provider() is not { } provider || ModelChoice.SelectedItem is not ComboBoxItem { Tag: string id }) return;
         Update(s => s.WithModel(provider, id));
+    }
+
+    /// <summary>"Ücretsiz anahtar al": Gemini seçilir (anahtar alanı görünür) ve Google AI Studio'nun anahtar sayfası açılır.</summary>
+    private void OnFreeGemini(object sender, RoutedEventArgs e)
+    {
+        controller.ChooseFreeGemini();
+        loading = true;
+        Engine.SelectedItem = Engine.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == nameof(TranslationEngine.Gemini));
+        loading = false;
+        ShowEngine();
+        Process.Start(new ProcessStartInfo(AiProvider.Gemini.KeyPage().AbsoluteUri) { UseShellExecute = true });
     }
 
     private void OnLink(object sender, RequestNavigateEventArgs e) =>

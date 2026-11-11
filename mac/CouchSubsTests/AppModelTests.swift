@@ -33,6 +33,14 @@ final class FakeServices: AppServices {
     var pairCount = 0
     var onMoved: ((LGTV) -> Void)?
 
+    /// "Kaydet ve dene"nin sonucu; gerçek hizmete gidilmez.
+    var aiResult: Result<String, AIFailure> = .success("KRATOS: Gidiyoruz.")
+    var aiTests: [(provider: AIProvider, key: String, model: String?)] = []
+    func testAIKey(provider: AIProvider, key: String, model: String?) async -> Result<String, AIFailure> {
+        aiTests.append((provider, key, model))
+        return aiResult
+    }
+
     func discoverConsoles() async -> [ConsoleInfo] { consoles }
     func accountId(fromRedirect url: URL) async throws -> Data { Data(repeating: 1, count: 8) }
     func register(host: String, accountId: Data, pin: UInt32) async throws -> RegisteredConsole {
@@ -220,7 +228,89 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.step, .tv)
         try await model.pair(LGTV(name: "LG TV", host: "192.168.1.153")); model.advance()
         XCTAssertEqual(model.step, .test); model.advance()
+        XCTAssertEqual(model.step, .betterTranslation)
+        XCTAssertTrue(model.canAdvance)
+        model.advance()
         XCTAssertEqual(model.step, .done)
+    }
+
+    /// "Daha iyi çeviri" adımı isteğe bağlıdır: geçilirse ücretsiz çeviri kalır; anahtar kabul edilirse Gemini seçilir.
+    func testBetterTranslationStepCanBeSkipped() {
+        let model = AppModel(services: FakeServices(), store: MemoryStore(), defaults: .isolated())
+        model.step = .betterTranslation
+        XCTAssertFalse(model.usesFreeGemini)
+        XCTAssertTrue(model.canAdvance)
+        model.advance()
+        XCTAssertEqual(model.step, .done)
+        XCTAssertEqual(model.settings.translationEngine, .free)
+        model.back()
+        XCTAssertEqual(model.step, .betterTranslation)
+        model.back()
+        XCTAssertEqual(model.step, .test)
+    }
+
+    func testBetterTranslationStepSavesTheKeyAndSelectsGemini() async {
+        let services = FakeServices()
+        let store = MemoryStore()
+        let model = AppModel(services: services, store: store, defaults: .isolated())
+        model.step = .betterTranslation
+        let result = await model.setAIKey("  AIza-free  ", for: .gemini)
+        XCTAssertEqual(result, .success("KRATOS: Gidiyoruz."))
+        XCTAssertEqual(services.aiTests.first?.provider, .gemini)
+        XCTAssertEqual(services.aiTests.first?.key, "AIza-free")
+        // Ücretsiz katmandaki varsayılan model denenir.
+        XCTAssertEqual(services.aiTests.first?.model, AIProvider.gemini.defaultModel.id)
+        XCTAssertTrue(AIProvider.gemini.defaultModel.freeTier)
+        XCTAssertEqual(store.load(String.self, for: StoreKey.geminiKey), "AIza-free")
+        XCTAssertEqual(model.settings.translationEngine, .gemini)
+        XCTAssertTrue(model.usesFreeGemini)
+        model.advance()
+        XCTAssertEqual(model.step, .done)
+    }
+
+    /// Yanlış anahtar kaydedilmez, motor değişmez; dakikalık sınıra takılan anahtar geçerlidir ve kaydedilir.
+    func testBetterTranslationStepRejectsAWrongKey() async {
+        let services = FakeServices()
+        services.aiResult = .failure(.invalidKey)
+        let model = AppModel(services: services, store: MemoryStore(), defaults: .isolated())
+        model.step = .betterTranslation
+        let result = await model.setAIKey("wrong", for: .gemini)
+        XCTAssertEqual(result, .failure(.invalidKey))
+        XCTAssertFalse(model.hasKey(.gemini))
+        XCTAssertEqual(model.settings.translationEngine, .free)
+        XCTAssertFalse(model.usesFreeGemini)
+
+        services.aiResult = .failure(.quotaExceeded)
+        _ = await model.setAIKey("AIza-busy", for: .gemini)
+        XCTAssertTrue(model.usesFreeGemini)
+    }
+
+    /// Ayarlardaki "Ücretsiz anahtar al" Gemini'yi seçer; anahtar gelene dek ücretsiz çeviri sürer.
+    func testChooseFreeGeminiSelectsGeminiWithoutAKey() {
+        let model = AppModel(services: FakeServices(), store: MemoryStore(), defaults: .isolated())
+        model.chooseFreeGemini()
+        XCTAssertEqual(model.settings.translationEngine, .gemini)
+        XCTAssertFalse(model.onlineTranslationActive)
+        XCTAssertFalse(model.usesFreeGemini)
+    }
+
+    /// Yeni metinler ortak metin dosyasında Türkçesiyle durur (Windows da aynı dosyayı okur).
+    func testFreeGeminiStringsAreTranslated() throws {
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("CouchSubs/Resources/Localizable.xcstrings")
+        let root = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? [String: Any]
+        let strings = root?["strings"] as? [String: Any] ?? [:]
+        for key in ["Better translation (free)", "Get a free key", "Skip for now", "For better translation, get a free Gemini key.",
+                    "Gemini is ready. Subtitles will be translated with Gemini.",
+                    "Press Get a free key and sign in with your Google account.", "Press Create API key and copy the key.",
+                    "Paste the key here and press Save and test.",
+                    "The free translation works without the internet but often sounds stiff. Google's Gemini translates much more naturally, and a free Google key is enough.",
+                    "Subtitle text is sent to Google. With a free key, Google may use it to improve its products, and people at Google may read it. Only the game's subtitles are sent.",
+                    "The free key has a per-minute limit. When it is reached, that line is translated by the free translation."] {
+            let entry = strings[key] as? [String: Any]
+            let tr = ((entry?["localizations"] as? [String: Any])?["tr"] as? [String: Any])?["stringUnit"] as? [String: Any]
+            XCTAssertNotNil(tr?["value"] as? String, key)
+        }
     }
 }
 

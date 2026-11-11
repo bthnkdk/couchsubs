@@ -1,0 +1,36 @@
+<!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- İsteğe bağlı son adım: ücretsiz Gemini anahtarıyla daha doğal çeviri (Mac'teki BetterTranslationStep ile aynı). -->
+<UserControl x:Class="CouchSubs.App.Views.Steps.BetterTranslationStep"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:CouchSubs.App.Controls"
+             xmlns:t="clr-namespace:CouchSubs.App.Theme">
+    <c:StepLayout Glyph="{x:Static c:Glyphs.Characters}" Title="{t:T 'Better translation (free)'}"
+                  Message="{t:T 'The free translation works without the internet but often sounds stiff. Google\'s Gemini translates much more naturally, and a free Google key is enough.'}">
+        <StackPanel>
+            <TextBlock x:Name="Ready" Text="{t:T 'Gemini is ready. Subtitles will be translated with Gemini.'}" Style="{StaticResource DoneText}"
+                       TextWrapping="Wrap" Margin="0,0,0,16" Visibility="Collapsed" />
+            <StackPanel x:Name="NewKey">
+                <c:Card>
+                    <StackPanel>
+                        <c:NumberedRow Number="1" Text="{t:T 'Press Get a free key and sign in with your Google account.'}" />
+                        <c:NumberedRow Number="2" Text="{t:T 'Press Create API key and copy the key.'}" />
+                        <c:NumberedRow Number="3" Text="{t:T 'Paste the key here and press Save and test.'}" />
+                        <Button Content="{t:T 'Get a free key'}" Style="{StaticResource PrimaryButton}" HorizontalAlignment="Left"
+                                Margin="0,8,0,0" Click="OnGetKey" />
+                    </StackPanel>
+                </c:Card>
+                <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                    <PasswordBox x:Name="KeyBox" Width="320" VerticalContentAlignment="Center" PasswordChanged="OnKeyChanged" />
+                    <Button x:Name="KeySave" Content="{t:T 'Save and test'}" Margin="12,0,0,0" IsEnabled="False" Click="OnSave" />
+                </StackPanel>
+            </StackPanel>
+            <TextBlock x:Name="KeyStatus" Style="{StaticResource HintText}" Margin="0,12,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+            <TextBlock x:Name="KeyError" Style="{StaticResource ErrorText}" Margin="0,12,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
+            <TextBlock Style="{StaticResource HintText}" Margin="0,16,0,0" TextWrapping="Wrap"
+                       Text="{t:T 'Subtitle text is sent to Google. With a free key, Google may use it to improve its products, and people at Google may read it. Only the game\'s subtitles are sent.'}" />
+            <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                       Text="{t:T 'The free key has a per-minute limit. When it is reached, that line is translated by the free translation.'}" />
+        </StackPanel>
+    </c:StepLayout>
+</UserControl>

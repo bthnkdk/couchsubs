@@ -107,6 +107,17 @@
                         <TextBlock x:Name="EngineHint" Style="{StaticResource HintText}" TextWrapping="Wrap" />
                         <TextBlock x:Name="EnglishOnlyHint" Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0" Visibility="Collapsed"
                                    Text="{t:T 'Online engines translate English games only. For other game languages the free translation is used.'}" />
+                        <!-- Ücretsiz çeviri zayıf kalıyor; ücretsiz Gemini anahtarı en kolay iyileştirme (Mac ile aynı). -->
+                        <DockPanel x:Name="FreeGeminiOffer" Margin="0,12,0,0">
+                            <Button DockPanel.Dock="Right" Content="{t:T 'Get a free key'}" Margin="12,0,0,0" Click="OnFreeGemini" />
+                            <TextBlock Text="{t:T 'For better translation, get a free Gemini key.'}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </DockPanel>
+                        <StackPanel x:Name="FreeGeminiNotes" Visibility="Collapsed">
+                            <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       Text="{t:T 'Subtitle text is sent to Google. With a free key, Google may use it to improve its products, and people at Google may read it. Only the game\'s subtitles are sent.'}" />
+                            <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       Text="{t:T 'The free key has a per-minute limit. When it is reached, that line is translated by the free translation.'}" />
+                        </StackPanel>
                         <StackPanel x:Name="KeyPanel" Margin="0,12,0,0">
                             <!-- Model adı yazılamaz; yalnız ortak listedeki modeller seçilir. -->
                             <StackPanel x:Name="ModelPanel" Orientation="Horizontal" Margin="0,0,0,12">

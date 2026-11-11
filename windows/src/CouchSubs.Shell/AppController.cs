@@ -150,7 +150,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         set
         {
             var old = settings;
-            if (!Set(ref settings, value)) return;
+            if (!Set(ref settings, value, [nameof(UsesFreeGemini)])) return;
             settingsStore.Save(value);
             server.SendStyle(value.Style);
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
@@ -170,7 +170,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public bool CanAdvance => step switch
     {
-        OnboardingStep.Welcome or OnboardingStep.SecondAccount or OnboardingStep.Test => true,
+        OnboardingStep.Welcome or OnboardingStep.SecondAccount or OnboardingStep.Test or OnboardingStep.BetterTranslation => true,
         OnboardingStep.PsnLogin => accountId is not null,
         OnboardingStep.Console => console is not null,
         OnboardingStep.Tv => tv is not null && store.Load<string>(StoreKeys.TvKey) is not null,
@@ -190,6 +190,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         if (step > OnboardingStep.Welcome) Step = step - 1;
     }
+
+    /// <summary>Ücretsiz Gemini anahtarı kayıtlı ve çeviri Gemini ile yapılıyor ("Daha iyi çeviri" adımı tamam).</summary>
+    public bool UsesFreeGemini => settings.Engine == TranslationEngine.Gemini && HasKey(TranslationEngine.Gemini);
+
+    /// <summary>Ayarlardaki "Ücretsiz anahtar al": Gemini seçilir, anahtar alanı görünür (anahtar gelene dek ücretsiz çeviri sürer).</summary>
+    public void ChooseFreeGemini() => Settings = settings.WithEngine(TranslationEngine.Gemini);
 
     public async Task CompletePsnLoginAsync(Uri redirect)
     {
@@ -951,7 +957,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         if (engine.StoreKey() is not { } storeKey) return;
         store.Remove(storeKey);
-        Changed(nameof(HasDeepLKey));
+        Changed(nameof(HasDeepLKey), nameof(UsesFreeGemini));
         if (settings.Engine == engine) Settings = settings.WithEngine(TranslationEngine.Free);
         RefreshTranslatorStatus();
     }
@@ -964,6 +970,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         // Motor zaten seçiliydi, anahtar yeni geldi: hat yeni anahtarla kurulsun.
         if (settings.Engine == engine && isRunning) MakePipeline();
         else Settings = settings.WithEngine(engine);
+        Changed(nameof(UsesFreeGemini));
         RefreshTranslatorStatus();
     }
 

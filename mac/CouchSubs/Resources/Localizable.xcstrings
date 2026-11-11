@@ -4880,6 +4880,182 @@
           }
         }
       }
+    },
+    "Better translation (free)": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Better translation (free)"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daha iyi çeviri (ücretsiz)"
+          }
+        }
+      }
+    },
+    "Get a free key": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Get a free key"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretsiz anahtar al"
+          }
+        }
+      }
+    },
+    "Skip for now": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Skip for now"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Şimdilik geç"
+          }
+        }
+      }
+    },
+    "For better translation, get a free Gemini key.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "For better translation, get a free Gemini key."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Daha iyi çeviri için ücretsiz Gemini anahtarı alın."
+          }
+        }
+      }
+    },
+    "Gemini is ready. Subtitles will be translated with Gemini.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini is ready. Subtitles will be translated with Gemini."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini hazır. Altyazılar Gemini ile çevrilecek."
+          }
+        }
+      }
+    },
+    "Press Get a free key and sign in with your Google account.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press Get a free key and sign in with your Google account."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "\"Ücretsiz anahtar al\"a basın ve Google hesabınızla giriş yapın."
+          }
+        }
+      }
+    },
+    "Press Create API key and copy the key.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press Create API key and copy the key."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "\"Create API key\" (API anahtarı oluştur) düğmesine basın ve anahtarı kopyalayın."
+          }
+        }
+      }
+    },
+    "Paste the key here and press Save and test.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Paste the key here and press Save and test."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anahtarı buraya yapıştırıp \"Kaydet ve dene\"ye basın."
+          }
+        }
+      }
+    },
+    "The free translation works without the internet but often sounds stiff. Google's Gemini translates much more naturally, and a free Google key is enough.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The free translation works without the internet but often sounds stiff. Google's Gemini translates much more naturally, and a free Google key is enough."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretsiz çeviri internetsiz çalışır ama çoğu zaman yapay durur. Google'ın Gemini'si çok daha doğal çevirir; ücretsiz bir Google anahtarı yeter."
+          }
+        }
+      }
+    },
+    "Subtitle text is sent to Google. With a free key, Google may use it to improve its products, and people at Google may read it. Only the game's subtitles are sent.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subtitle text is sent to Google. With a free key, Google may use it to improve its products, and people at Google may read it. Only the game's subtitles are sent."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Altyazı metni Google'a gönderilir. Ücretsiz anahtarda Google bu metni ürünlerini geliştirmek için kullanabilir ve Google çalışanları okuyabilir. Yalnız oyunun altyazıları gönderilir."
+          }
+        }
+      }
+    },
+    "The free key has a per-minute limit. When it is reached, that line is translated by the free translation.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The free key has a per-minute limit. When it is reached, that line is translated by the free translation."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ücretsiz anahtarın dakikalık bir sınırı var. Sınıra gelince o satırı ücretsiz çeviri çevirir."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -93,9 +93,12 @@ Her iki platformda aynı adla bulunur.
 
 ## Ekranlar
 
-**Kurulum sihirbazı**: üstte küçük logo + "CouchSubs" + sağda "Adım n / 6", altında ilerleme
+**Kurulum sihirbazı**: üstte küçük logo + "CouchSubs" + sağda "Adım n / toplam", altında ilerleme
 çubuğu; ortada kaydırılabilir StepLayout; en altta `surface` zeminli çubukta solda "Geri"
-(ikincil), sağda "Devam" (birincil).
+(ikincil), sağda "Devam" (birincil). Son adım isteğe bağlı "Daha iyi çeviri (ücretsiz)": tek cümle
+açıklama, numaralı üç satır ve "Ücretsiz anahtar al" (birincil, Google AI Studio'nun anahtar sayfası),
+gizli anahtar alanı ve "Kaydet ve dene" (ikincil), altta veri kullanımı ve dakikalık sınır HintText'i.
+Anahtar yokken alttaki düğme "Şimdilik geç" (ikincil) olur; kaydedilince "Gemini hazır" (DoneLabel) ve "Devam".
 
 **Ana ekran** (yukarıdan aşağı): logo + "CouchSubs" + sağda ayar simgesi; tam genişlikte
 "Çeviriyi başlat" (birincil) ya da "Çeviriyi durdur" (tehlikeli); PS5 ve TV durumlarını gösteren
@@ -108,6 +111,8 @@ kart; gerekiyorsa dil paketi uyarı kartı; "Son altyazı" kartında `title` boy
 seçimi, gizli anahtar alanı ve "Kaydet ve dene" (ikincil), anahtar sayfası bağlantısı, kayıtlıysa "Anahtar kayıtlı" (DoneLabel) ile
 "Dene" ve "Anahtarı sil" (ikincil). Model yazılamaz; "Model" seçiminde yalnız ortak listedeki modeller
 (`core/Sources/CouchSubsCore/Resources/ai-models.json`) sade adlarıyla görünür. Sonuç HintText, hata ErrorText olur.
+Ücretsiz motor seçiliyken altında "Daha iyi çeviri için ücretsiz Gemini anahtarı alın." ve "Ücretsiz anahtar al"
+(ikincil; Gemini'yi seçer ve anahtar sayfasını açar) durur; Gemini seçiliyken veri kullanımı ve dakikalık sınır HintText'i görünür.
 Çevrimiçi motor çeviri sırasında hata verirse ana ekranda uyarı kartı çıkar.
 
 **Hakkında**: 88 pt logo, ad, sürüm, lisans, teşekkür, bağlantılar, Sony ile ilişkisizlik notu.

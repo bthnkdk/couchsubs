@@ -27,6 +27,20 @@ public partial class OnboardingView : UserControl
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(AppController.Step)) ShowStep();
+        else if (e.PropertyName == nameof(AppController.UsesFreeGemini)) ShowContinue();
+    }
+
+    /// <summary>
+    /// "Daha iyi çeviri" isteğe bağlıdır: anahtar yokken alttaki düğme ikincil "Şimdilik geç" (birincil düğme adımdaki
+    /// "Ücretsiz anahtar al"), anahtar kaydedilince birincil "Devam".
+    /// </summary>
+    private void ShowContinue()
+    {
+        var skip = controller.Step == OnboardingStep.BetterTranslation && !controller.UsesFreeGemini;
+        ContinueButton.Content = Localizer.Current[skip ? "Skip for now" : "Continue"];
+        ContinueButton.Style = (Style)FindResource(skip ? "SecondaryButton" : "PrimaryButton");
+        // Anahtar alanında Enter adımı geçmesin.
+        ContinueButton.IsDefault = !skip;
     }
 
     private void ShowStep()
@@ -39,12 +53,14 @@ public partial class OnboardingView : UserControl
             OnboardingStep.Console => new ConsoleStep(),
             OnboardingStep.Tv => new TvStep(),
             OnboardingStep.Translation => new TranslationStep(),
-            _ => new TestStep(),
+            OnboardingStep.Test => new TestStep(),
+            _ => new BetterTranslationStep(),
         };
         Counter.Text = Localizer.Current.Format("Step %lld of %lld", controller.StepNumber, AppController.StepCount);
         Progress.Value = (double)controller.StepNumber / AppController.StepCount;
         BackButton.Visibility = controller.Step == OnboardingStep.Welcome ? Visibility.Hidden : Visibility.Visible;
         ContinueButton.Visibility = controller.Step == OnboardingStep.Test ? Visibility.Hidden : Visibility.Visible;
+        ShowContinue();
     }
 
     private void OnBack(object sender, RoutedEventArgs e) => controller.Back();

@@ -62,6 +62,8 @@ public class StatusRow : Control
 /// <summary>Segoe Fluent Icons simge adları (Mac'teki SF Symbols karşılıkları).</summary>
 public static class Glyphs
 {
+    /// <summary>Segoe Fluent Icons "Characters" (U+E8C1); "Daha iyi çeviri" adımı.</summary>
+    public const string Characters = "";
     public const string Captions = "";
     public const string People = "";
     public const string Person = "";
