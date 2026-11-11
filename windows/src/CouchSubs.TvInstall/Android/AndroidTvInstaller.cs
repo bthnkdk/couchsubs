@@ -86,10 +86,31 @@ public sealed partial class AndroidTvInstaller(string host, string keyDirectory,
     {
         await using var adb = await ConnectAsync(cancellationToken);
         var installed = VersionFromDumpsys(await adb.RunAsync($"shell:dumpsys package {PackageName}", cancellationToken: cancellationToken));
-        if (installed is not null && !Versions.IsNewer(version, installed)) return (installed, false);
+        if (installed is not null && !Versions.IsNewer(version, installed))
+        {
+            await GrantOverlayAsync(adb, cancellationToken);
+            return (installed, false);
+        }
         await InstallAsync(adb, apkPath, cancellationToken);
+        await GrantOverlayAsync(adb, cancellationToken);
         await adb.RunAsync($"shell:am start -n {PackageName}/.MainActivity", cancellationToken: cancellationToken);
         return (version, true);
+    }
+
+    /// <summary>
+    /// "Diğer uygulamaların üzerinde göster" iznini verir: overlay modunda (TCL) altyazı TV'nin kendi HDMI ekranının
+    /// üstünde çizilir. Google TV'lerde bu ayar çoğu zaman menüde gizlidir; verilemezse TV uygulaması kendisi sorar.
+    /// </summary>
+    private static async Task GrantOverlayAsync(AdbConnection adb, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await adb.RunAsync($"shell:appops set {PackageName} SYSTEM_ALERT_WINDOW allow", cancellationToken: cancellationToken);
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            // İzin verilemedi: kurulum yine başarılı sayılır.
+        }
     }
 
     internal static string? VersionFromDumpsys(string output) =>
