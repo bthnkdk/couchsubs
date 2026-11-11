@@ -49,8 +49,29 @@ public partial class SettingsWindow : Window
         Dubbing.Attach(controller);
         Engine.SelectedItem = Engine.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Engine.ToString());
         ShowEngine();
+        GamePacks.IsChecked = settings.GamePacks;
+        SharePool.IsChecked = settings.SharePool;
+        ShowPacks();
         loading = false;
     }
+
+    /// <summary>Kurulu oyun paketleri: ad ve satır sayısı.</summary>
+    private void ShowPacks()
+    {
+        var text = Localizer.Current;
+        PackList.Items.Clear();
+        if (controller.InstalledPacks.Count == 0)
+        {
+            PackList.Items.Add(new TextBlock { Text = text["No game pack is installed."], Style = (Style)FindResource("HintText"), TextWrapping = TextWrapping.Wrap });
+            return;
+        }
+        foreach (var pack in controller.InstalledPacks)
+            PackList.Items.Add(new TextBlock { Text = text.Format("%1$@ · %2$@ lines", pack.Title, pack.Entries.ToString("N0")), Margin = new Thickness(0, 0, 0, 4) });
+    }
+
+    private void OnGamePacks(object sender, RoutedEventArgs e) => Update(s => s with { GamePacks = GamePacks.IsChecked == true });
+
+    private void OnSharePool(object sender, RoutedEventArgs e) => Update(s => s with { SharePool = SharePool.IsChecked == true });
 
     /// <summary>Seçili motor (ayarlarda ücretsiz ise Free).</summary>
     private TranslationEngine SelectedEngine =>

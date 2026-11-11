@@ -109,6 +109,9 @@ seçimi, gizli anahtar alanı ve "Kaydet ve dene" (ikincil), anahtar sayfası ba
 "Dene" ve "Anahtarı sil" (ikincil). Model yazılamaz; "Model" seçiminde yalnız ortak listedeki modeller
 (`core/Sources/CouchSubsCore/Resources/ai-models.json`) sade adlarıyla görünür. Sonuç HintText, hata ErrorText olur.
 Çevrimiçi motor çeviri sırasında hata verirse ana ekranda uyarı kartı çıkar.
+"Çeviri" kartının sonunda ayraçtan sonra "Oyun paketleri" (`headline`): "Oyun paketlerini kullan" anahtarı, HintText
+açıklama, kurulu paketler "Ad · n satır" (`body`); ikinci ayraçtan sonra "Okunan İngilizce altyazıları ortak havuza
+gönder" anahtarı (varsayılan açık) ve tek satırlık HintText. Kurulumun son adımında havuz bir HintText ile söylenir.
 
 **Hakkında**: 88 pt logo, ad, sürüm, lisans, teşekkür, bağlantılar, Sony ile ilişkisizlik notu.
 

@@ -132,6 +132,19 @@
                             <TextBlock x:Name="KeyStatus" Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
                             <TextBlock x:Name="KeyError" Style="{StaticResource ErrorText}" Margin="0,8,0,0" TextWrapping="Wrap" Visibility="Collapsed" />
                         </StackPanel>
+                        <!-- Oyun paketleri (hazır Türkçe çeviriler) ve ortak havuz (Mac ile aynı düzen) -->
+                        <Separator Margin="0,16,0,16" />
+                        <TextBlock Text="{t:T 'Game packs'}" Style="{StaticResource HeadlineText}" Margin="0,0,0,12" />
+                        <CheckBox x:Name="GamePacks" Content="{t:T 'Use game packs'}" Foreground="{DynamicResource textPrimaryBrush}" Margin="0,0,0,8"
+                                  Checked="OnGamePacks" Unchecked="OnGamePacks" />
+                        <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap"
+                                   Text="{t:T 'Ready-made Turkish translations for some games. A line found in a pack appears at once, without the translation engine.'}" />
+                        <ItemsControl x:Name="PackList" Margin="0,8,0,0" />
+                        <Separator Margin="0,16,0,16" />
+                        <CheckBox x:Name="SharePool" Content="{t:T 'Send the English subtitles read to the shared pool'}" Foreground="{DynamicResource textPrimaryBrush}"
+                                  Margin="0,0,0,8" Checked="OnSharePool" Unchecked="OnSharePool" />
+                        <TextBlock Style="{StaticResource HintText}" TextWrapping="Wrap"
+                                   Text="{t:T 'Only the game\'s English text is sent, anonymously. It is used to make better Turkish translations for everyone.'}" />
                     </StackPanel>
                 </c:Card>
 

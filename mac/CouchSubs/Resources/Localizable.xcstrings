@@ -4880,6 +4880,134 @@
           }
         }
       }
+    },
+    "Game packs": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Game packs"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oyun paketleri"
+          }
+        }
+      }
+    },
+    "Use game packs": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use game packs"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Oyun paketlerini kullan"
+          }
+        }
+      }
+    },
+    "Ready-made Turkish translations for some games. A line found in a pack appears at once, without the translation engine.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ready-made Turkish translations for some games. A line found in a pack appears at once, without the translation engine."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bazı oyunlar için hazır Türkçe çeviriler. Pakette bulunan satır, çeviri motoruna gitmeden hemen görünür."
+          }
+        }
+      }
+    },
+    "No game pack is installed.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No game pack is installed."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yüklü oyun paketi yok."
+          }
+        }
+      }
+    },
+    "%1$@ · %2$@ lines": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ lines"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ · %2$@ satır"
+          }
+        }
+      }
+    },
+    "Send the English subtitles read to the shared pool": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send the English subtitles read to the shared pool"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Okunan İngilizce altyazıları ortak havuza gönder"
+          }
+        }
+      }
+    },
+    "Only the game's English text is sent, anonymously. It is used to make better Turkish translations for everyone.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only the game's English text is sent, anonymously. It is used to make better Turkish translations for everyone."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yalnız oyunun İngilizce metni anonim olarak gönderilir. Herkes için daha iyi Türkçe çeviriler hazırlamakta kullanılır."
+          }
+        }
+      }
+    },
+    "CouchSubs sends the English subtitles it reads to a shared pool, anonymously, to make better Turkish translations for everyone. You can turn this off in Settings.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CouchSubs sends the English subtitles it reads to a shared pool, anonymously, to make better Turkish translations for everyone. You can turn this off in Settings."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CouchSubs, okuduğu İngilizce altyazıları anonim olarak ortak havuza gönderir; böylece herkes için daha iyi Türkçe çeviriler hazırlanır. Ayarlar'dan kapatabilirsiniz."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

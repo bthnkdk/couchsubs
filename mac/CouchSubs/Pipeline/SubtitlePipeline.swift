@@ -71,6 +71,15 @@ final class SubtitlePipeline {
     var onReadResult: ((Error?) -> Void)?
     /// Her çeviri denemesinden sonra çağrılır (başarılıysa nil).
     var onTranslationResult: ((TranslatorError?) -> Void)?
+    /// Oyun paketi: kararlı satırın hazır Türkçesi (yoksa nil). Çeviri motorundan ve önbellekten önce bakılır; bulunursa
+    /// motor hiç çağrılmaz ve çeviri beklemeden gösterilir. Uygulama paketler açıkken verir.
+    var packLookup: ((String) -> PackMatch?)?
+    /// Hiçbir pakette bulunmayan kararlı satır (ortak havuz için).
+    var onPackMiss: ((String) -> Void)?
+    /// Son gösterilen çevirinin nereden geldiği: "paket" ya da "motor" (günlük ve sayım için).
+    private(set) var lastOrigin: String?
+    /// Bu hatta paketten gelen satır sayısı.
+    private(set) var packHits = 0
 
     /// `scheduler`: varsayılanı her kareyi okur; uygulama gereksiz okumaları atlayan planı verir.
     /// `clock`: milisaniye saati; testlerde sahtesi verilir.
@@ -138,6 +147,11 @@ final class SubtitlePipeline {
         lastRequested += 1
         let request = Request(number: lastRequested, source: source, box: box, session: session)
         lineOnScreen = request.number
+        if let packed = packLookup?(source) {
+            showPacked(request, packed)
+            return
+        }
+        onPackMiss?(source)
         // Çeviri sürüyorsa yeni satır sıraya girer; sıradaki eski satır atlanır (artık ekranda değil).
         guard inFlight == nil else {
             pending = request
@@ -145,6 +159,24 @@ final class SubtitlePipeline {
         }
         inFlight = request
         pump = Task { [weak self] in await self?.runPump() }
+    }
+
+    /// Paketteki Türkçe hemen gösterilir; süren çevirinin sonucu (eski satır) artık gösterilmez.
+    private func showPacked(_ request: Request, _ packed: PackMatch) {
+        pending = nil
+        packHits += 1
+        let source = request.source
+        let translated = packed.text
+        let shouldSend = stabilizer.shouldSend(source: source, translation: translated)
+        remember(request.number, source, shouldSend ? translated : nil)
+        guard shouldSend else { return }
+        lastShown = request.number
+        server.sendSubtitle(translated, durationMs: 15000, box: request.box)
+        lastPair = (source, translated)
+        lastBox = request.box
+        lastOrigin = "paket"
+        onPair?(source, translated)
+        onSpeech?(packed.spoken)
     }
 
     /// Az önce kalkıp geri gelen satır: çevirmene gitmeden eski çevirisi yeniden gösterilir.
@@ -213,6 +245,7 @@ final class SubtitlePipeline {
             server.sendSubtitle(translated, durationMs: onScreen ? 15000 : Self.readingTime(for: translated), box: request.box)
             lastPair = (source, translated)
             lastBox = request.box
+            lastOrigin = "motor"
             onPair?(source, translated)
             if let onSpeech { onSpeech(translator.spokenLines(for: source)) }
         } catch {

@@ -78,6 +78,10 @@ struct UserSettings: Codable, Equatable {
     var geminiModel = AIProvider.gemini.defaultModel.id
     var openAIModel = AIProvider.openAI.defaultModel.id
     var claudeModel = AIProvider.claude.defaultModel.id
+    /// Oyun paketlerindeki hazır Türkçe çeviriler kullanılır (yalnız İngilizce→Türkçe).
+    var gamePacks = true
+    /// Pakette bulunmayan İngilizce satırlar ortak havuza gönderilir (anonim; bkz. `LinePool`).
+    var sharePool = LinePool.enabledByDefault
 
     init() {}
 
@@ -96,6 +100,8 @@ struct UserSettings: Codable, Equatable {
         geminiModel = try values.decodeIfPresent(String.self, forKey: .geminiModel) ?? defaults.geminiModel
         openAIModel = try values.decodeIfPresent(String.self, forKey: .openAIModel) ?? defaults.openAIModel
         claudeModel = try values.decodeIfPresent(String.self, forKey: .claudeModel) ?? defaults.claudeModel
+        gamePacks = try values.decodeIfPresent(Bool.self, forKey: .gamePacks) ?? defaults.gamePacks
+        sharePool = try values.decodeIfPresent(Bool.self, forKey: .sharePool) ?? defaults.sharePool
     }
 
     /// Listede olmayan kayıtlı modeller (eski ayar ya da listeden çıkarılan model) varsayılana döner.
@@ -454,6 +460,11 @@ final class AppModel {
             if let data = try? JSONEncoder().encode(settings) { defaults.set(data, forKey: StoreKey.settings) }
             server.sendStyle(settings.style)
             if settings.dubbing != oldValue.dubbing { dubbingSettingsChanged(from: oldValue.dubbing) }
+            if settings.gamePacks != oldValue.gamePacks, let pipeline { connectPacks(to: pipeline) }
+            if settings.sharePool != oldValue.sharePool {
+                let (pool, enabled) = (pool, settings.sharePool)
+                Task { await pool.setEnabled(enabled) }
+            }
             let translationChanged = settings.onlineTranslation != oldValue.onlineTranslation
                 || settings.onlineEngine != oldValue.onlineEngine || settings.geminiModel != oldValue.geminiModel
                 || settings.openAIModel != oldValue.openAIModel || settings.claudeModel != oldValue.claudeModel
@@ -506,6 +517,15 @@ final class AppModel {
     private var processing = false
     private var wakeObserver: NSObjectProtocol?
 
+    // Oyun paketleri ve ortak havuz
+    /// Uygulamayla gelen ve ~/Library/Application Support/CouchSubs/packs klasöründeki paketler.
+    let packs = GamePackLibrary(bundled: GamePackLibrary.bundledDirectory, user: GamePackLibrary.userDirectory)
+    /// Ayarlarda listelenen paketler (açılışta arka planda yüklenince dolar).
+    var installedPacks: [GamePackLibrary.Info] = []
+    private let pool: LinePool
+    @ObservationIgnored private var poolTimer: Task<Void, Never>?
+    @ObservationIgnored private var terminateObserver: NSObjectProtocol?
+
     // Dublaj
     private var dubber: Dubber?
     /// Model indiriliyorsa ilerleme (0…1).
@@ -527,6 +547,10 @@ final class AppModel {
         let loaded = defaults.data(forKey: StoreKey.settings).flatMap { try? JSONDecoder().decode(UserSettings.self, from: $0) } ?? UserSettings()
         let curated = loaded.withCuratedModels()
         settings = curated
+        let poolFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(AppIdentity.name, isDirectory: true).appendingPathComponent("pool.json")
+        let testing = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        pool = LinePool(file: poolFile, app: AppIdentity.version, platform: "mac", enabled: curated.sharePool && !testing)
         // Listede olmayan model varsayılana döndüyse ayar hemen kaydedilir.
         if curated != loaded, let data = try? JSONEncoder().encode(curated) { defaults.set(data, forKey: StoreKey.settings) }
         step = ready ? .done : .welcome
@@ -534,6 +558,53 @@ final class AppModel {
             engine.storeKey.flatMap { store.load(String.self, for: $0) }?.isEmpty == false
         })
         server.onClientsChanged = { [weak self] count in self?.tvClients = count }
+
+        // Paketler ilk altyazıyı bekletmesin diye açılışta arka planda yüklenir.
+        let packs = self.packs
+        Task.detached(priority: .utility) { [weak self] in
+            let list = packs.packs
+            await MainActor.run { self?.installedPacks = list }
+        }
+        // Testlerde havuz hiçbir şey göndermez.
+        if !testing { startPool() }
+    }
+
+    /// Beş dakikada bir ve uygulama kapanırken havuz kuyruğu gönderilir; sunucuya ulaşılamazsa sonra yeniden denenir.
+    private func startPool() {
+        let pool = self.pool
+        poolTimer = Task.detached(priority: .background) {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(LinePool.flushInterval))
+                await pool.flush()
+            }
+        }
+        terminateObserver = NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
+                                                                   queue: nil) { _ in
+            // Kapanış en çok birkaç saniye bekler.
+            let done = DispatchSemaphore(value: 0)
+            Task.detached {
+                await pool.flush()
+                done.signal()
+            }
+            _ = done.wait(timeout: .now() + 3)
+        }
+    }
+
+    /// Paketler yalnız İngilizce→Türkçede ve ayar açıkken kullanılır. Pakette olmayan İngilizce satır havuza önerilir
+    /// (paketler kapalıysa da yalnız hiçbir pakette olmayanlar).
+    private func connectPacks(to pipeline: SubtitlePipeline) {
+        let packs = self.packs
+        let pool = self.pool
+        let active = settings.gamePacks && settings.sourceLanguage == "en" && settings.targetLanguage == "tr"
+        pipeline.packLookup = active ? { packs.match($0) } : nil
+        guard settings.sourceLanguage == "en" else {
+            pipeline.onPackMiss = nil
+            return
+        }
+        pipeline.onPackMiss = { text in
+            guard active || packs.match(text) == nil else { return }
+            Task { await pool.offer(text) }
+        }
     }
 
     // MARK: - Sihirbaz
@@ -930,6 +1001,7 @@ final class AppModel {
         }
         pipeline.onReadResult = { [weak self] error in self?.noteRead(error) }
         pipeline.onSpeech = { [weak self] lines in self?.speak(lines) }
+        connectPacks(to: pipeline)
         onlineIssue = nil
         pipeline.warmUp()
         self.pipeline = pipeline

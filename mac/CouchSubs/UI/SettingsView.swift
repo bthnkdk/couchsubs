@@ -171,6 +171,7 @@ struct TranslationCard: View {
             case .gemini, .openAI, .claude:
                 if let provider = engine.aiProvider { AIKeySection(provider: provider).id(provider) }
             }
+            GamePacksSection()
         }
     }
 
@@ -194,6 +195,30 @@ struct TranslationCard: View {
         case .modelRejected: String(format: String(localized: "%@ did not accept the request. Choose the other model or try again later."), name)
         case .unreachable: String(format: String(localized: "%@ could not be reached. Check your internet connection."), name)
         }
+    }
+}
+
+/// Oyun paketleri (hazır Türkçe çeviriler) ve ortak havuz (Windows'taki ayarlarla aynı düzen).
+private struct GamePacksSection: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        @Bindable var model = model
+        Divider().overlay(Color.csBorder)
+        Text("Game packs").font(.csHeadline)
+        Toggle("Use game packs", isOn: $model.settings.gamePacks)
+        HintText(text: "Ready-made Turkish translations for some games. A line found in a pack appears at once, without the translation engine.")
+        if model.installedPacks.isEmpty {
+            HintText(text: "No game pack is installed.")
+        } else {
+            ForEach(model.installedPacks) { pack in
+                Text(verbatim: String(format: String(localized: "%1$@ · %2$@ lines"), pack.title, pack.entries.formatted()))
+                    .font(.csBody)
+            }
+        }
+        Divider().overlay(Color.csBorder)
+        Toggle("Send the English subtitles read to the shared pool", isOn: $model.settings.sharePool)
+        HintText(text: "Only the game's English text is sent, anonymously. It is used to make better Turkish translations for everyone.")
     }
 }
 
