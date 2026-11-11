@@ -13,6 +13,8 @@
     <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\obs-overlay.html" LogicalName="obs-overlay.html" />
     <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\glossary-en-tr.json" LogicalName="glossary-en-tr.json" />
     <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\ai-models.json" LogicalName="ai-models.json" />
+    <!-- Oyun çeviri paketleri: Mac ile aynı klasör (ad: "packs/x.json.gz"). -->
+    <EmbeddedResource Include="..\..\..\core\Sources\CouchSubsCore\Resources\packs\*.json.gz" LogicalName="packs/%(Filename)%(Extension)" />
     <EmbeddedResource Include="..\..\..\mac\CouchSubs\Resources\Localizable.xcstrings" LogicalName="Localizable.xcstrings" />
   </ItemGroup>
 

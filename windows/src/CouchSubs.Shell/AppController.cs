@@ -75,6 +75,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     private bool dubbingDownloading;
     private double dubbingProgress;
     private string? dubbingError;
+    private IReadOnlyList<GamePackLibrary.Info> installedPacks = [];
+    private Timer? poolTimer;
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -97,6 +99,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var ready = accountId is not null && console is not null && (paired || store.Load<bool>(StoreKeys.SetupComplete));
         step = ready ? OnboardingStep.Done : OnboardingStep.Welcome;
         AttachServer();
+        StartPacksAndPool();
     }
 
     /// <summary>Sunucunun TV sayısını, altyazı yerini ve bilgisayar ekranına giden olayları bağlar (sunucu yeniden kurulunca da).</summary>
@@ -182,6 +185,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             server.SendStyle(value.Style);
             if (old.Output != value.Output) OutputChanged();
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
+            if (old.GamePacks != value.GamePacks && pipeline is not null) ConnectPacks(pipeline);
+            if (old.SharePool != value.SharePool) services.Pool?.SetEnabled(value.SharePool);
             var translationChanged = old.OnlineTranslation != value.OnlineTranslation || old.OnlineEngine != value.OnlineEngine
                                      || old.GeminiModel != value.GeminiModel || old.OpenAiModel != value.OpenAiModel
                                      || old.ClaudeModel != value.ClaudeModel;
@@ -950,6 +955,42 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     {
         Stop();
         server.Dispose();
+        poolTimer?.Dispose();
+        // Kapanırken kuyruk bir kez daha gönderilir; en çok birkaç saniye beklenir.
+        if (services.Pool is { } pool)
+        {
+            try { pool.FlushAsync().Wait(TimeSpan.FromSeconds(3)); }
+            catch (AggregateException) { }
+            pool.Save();
+        }
+    }
+
+    // --- Oyun paketleri ve ortak havuz ---
+
+    /// <summary>Ayarlarda listelenen paketler (açılışta arka planda yüklenince dolar).</summary>
+    public IReadOnlyList<GamePackLibrary.Info> InstalledPacks { get => installedPacks; private set => Set(ref installedPacks, value); }
+
+    /// <summary>Paketler yalnız İngilizce→Türkçede ve ayar açıkken kullanılır.</summary>
+    private bool PacksActive => settings.GamePacks && settings.SourceLanguage == "en" && settings.TargetLanguage == "tr" && services.GamePacks is not null;
+
+    private void StartPacksAndPool()
+    {
+        // Paketler ilk altyazıyı bekletmesin diye açılışta arka planda yüklenir.
+        if (services.GamePacks is { } packs) _ = Task.Run(() => { var list = packs.Packs; post(() => InstalledPacks = list); });
+        if (services.Pool is not { } pool) return;
+        pool.SetEnabled(settings.SharePool);
+        // Beş dakikada bir gönderilir; sunucuya ulaşılamazsa kuyruk diskte bekler, sonra yeniden denenir.
+        poolTimer = new Timer(_ => _ = pool.FlushAsync(), null, LinePool.FlushInterval, LinePool.FlushInterval);
+    }
+
+    private void ConnectPacks(SubtitlePipeline target) => target.PackLookup = PacksActive ? services.FindInPacks : null;
+
+    /// <summary>Pakette olmayan İngilizce satır havuza önerilir (paketler kapalıysa da yalnız hiçbir pakette olmayanlar).</summary>
+    private void OfferToPool(string text)
+    {
+        if (settings.SourceLanguage != "en" || services.Pool is not { } pool) return;
+        if (!PacksActive && services.FindInPacks(text) is not null) return;
+        pool.Offer(text);
     }
 
     // --- İç işleyiş ---
@@ -978,6 +1019,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         // Model bu arada inmiş olabilir; her çeviri sonucu durumu günceller.
         built.TranslationResult += error => post(() => TranslatorStatus = error ?? TranslatorStatus.Ready);
         built.SpeechReady += lines => post(() => Speak(lines));
+        built.PackMissed += OfferToPool;
+        ConnectPacks(built);
         OnlineIssue = null;
         pipeline = built;
     }

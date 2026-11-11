@@ -42,6 +42,7 @@ struct TestStep: View {
                                      : "If you don't see it, make sure the CouchSubs TV app is open and connect the TV again.")
                     }
                 }
+                HintText(text: "CouchSubs sends the English subtitles it reads to a shared pool, anonymously, to make better Turkish translations for everyone. You can turn this off in Settings.")
             }
         }
     }

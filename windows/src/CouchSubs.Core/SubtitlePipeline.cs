@@ -61,6 +61,18 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
     /// <summary>Her çeviri denemesinden sonra çağrılır (başarılıysa null).</summary>
     public event Action<TranslatorStatus?>? TranslationResult;
 
+    /// <summary>
+    /// Oyun paketi: kararlı satırın hazır Türkçesi (yoksa null). Çeviri motorundan ve önbellekten önce bakılır; bulunursa
+    /// motor hiç çağrılmaz ve çeviri beklemeden gösterilir. Uygulama paketler açıkken verir.
+    /// </summary>
+    public Func<string, PackMatch?>? PackLookup { get; set; }
+    /// <summary>Hiçbir pakette bulunmayan kararlı satır (ortak havuz için).</summary>
+    public event Action<string>? PackMissed;
+    /// <summary>Son gösterilen çevirinin nereden geldiği: "paket" ya da "motor" (günlük ve sayım için).</summary>
+    public string? LastOrigin { get; private set; }
+    /// <summary>Bu hatta paketten gelen satır sayısı.</summary>
+    public int PackHits { get; private set; }
+
     /// <summary>Okuma çeviriyi beklemez; böylece çeviri sürerken gelen satırlar da yakalanır.</summary>
     public async Task ProcessAsync(Frame frame, CropRegion region)
     {
@@ -92,6 +104,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         var area = new TextBox(region.Left, region.Top, region.Right, region.Bottom);
         var reading = raw.WithoutButtonPrompts().WithoutOcrNoise().SubtitleBlock(area);
 
+        Action? after = null;
         lock (gate)
         {
             var action = stabilizer.Feed(reading.Text);
@@ -104,14 +117,16 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
                     break;
                 case StabilizerKind.Translate:
                     LineLeft();
-                    Enqueue(action.Text!, box);
+                    after = Enqueue(action.Text!, box);
                     break;
                 case StabilizerKind.Restore:
                     LineLeft();
-                    Restore(action.Text!, box);
+                    after = Restore(action.Text!, box);
                     break;
             }
         }
+        // Olaylar kilidin dışında çağrılır.
+        after?.Invoke();
     }
 
     /// <summary>Ekrandaki satır kalktı (ya da yerine başkası geldi); çevirisi sürüyorsa ne zaman kalktığı not edilir.</summary>
@@ -124,33 +139,63 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
         lineOnScreen = null;
     }
 
-    private void Enqueue(string source, TextBox? box)
+    /// <returns>Kilit bırakıldıktan sonra çağrılacak olaylar (paketten gelen satır).</returns>
+    private Action? Enqueue(string source, TextBox? box)
     {
         var request = new Request(++lastRequested, source, box, session);
         lineOnScreen = request.Number;
+        if (PackLookup?.Invoke(source) is { } packed) return ShowPacked(request, packed);
+        var missed = PackMissed;
         // Çeviri sürüyorsa yeni satır sıraya girer; sıradaki eski satır atlanır (artık ekranda değil).
         if (inFlight is not null)
         {
             pending = request;
-            return;
         }
-        inFlight = request;
-        pump = Pump(request);
+        else
+        {
+            inFlight = request;
+            pump = Pump(request);
+        }
+        return missed is null ? null : () => missed(source);
+    }
+
+    /// <summary>Paketteki Türkçe hemen gösterilir; süren çevirinin sonucu (eski satır) artık gösterilmez.</summary>
+    private Action? ShowPacked(Request request, PackMatch packed)
+    {
+        pending = null;
+        PackHits++;
+        var source = request.Source;
+        var translated = packed.Text;
+        var shouldSend = stabilizer.ShouldSend(source, translated);
+        Remember(request.Number, source, shouldSend ? translated : null);
+        if (!shouldSend) return null;
+        lastShown = request.Number;
+        sender.SendSubtitle(translated, 15000, request.Box);
+        LastPair = (source, translated);
+        LastBox = request.Box;
+        LastOrigin = "paket";
+        var shown = PairShown;
+        var speech = SpeechReady;
+        return () =>
+        {
+            shown?.Invoke(source, translated);
+            speech?.Invoke(packed.Spoken);
+        };
     }
 
     /// <summary>Az önce kalkıp geri gelen satır: çevirmene gitmeden eski çevirisi yeniden gösterilir.</summary>
-    private void Restore(string source, TextBox? box)
+    private Action? Restore(string source, TextBox? box)
     {
         var index = pairs.FindLastIndex(pair => pair.Source == source);
         if (index >= 0)
         {
             var (number, _, translation) = pairs[index];
             lineOnScreen = number;
-            if (translation is null) return;
+            if (translation is null) return null;
             sender.SendSubtitle(translation, 15000, box);
             LastPair = (source, translation);
             LastBox = box;
-            return;
+            return null;
         }
         // Çevirisi henüz gelmediyse istek sürüyordur; satır yeniden ekranda sayılır.
         foreach (var request in new[] { inFlight, pending })
@@ -158,10 +203,10 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             if (request is null || request.Source != source || request.Session != session) continue;
             request.LeftAt = null;
             lineOnScreen = request.Number;
-            return;
+            return null;
         }
         // Çevirisi hiç yoksa (atlanmış ya da başarısız olmuş) normal yoldan çevrilir.
-        Enqueue(source, box);
+        return Enqueue(source, box);
     }
 
     /// <summary>Süren çeviriyi, bitince de sıradakini çevirir; sıra boşalınca durur.</summary>
@@ -247,6 +292,7 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             sender.SendSubtitle(translated, onScreen ? 15000 : ReadingTime(translated), request.Box);
             LastPair = (source, translated);
             LastBox = request.Box;
+            LastOrigin = "motor";
         }
         PairShown?.Invoke(source, translated);
         if (SpeechReady is { } speech) speech(translator.SpokenLines(source));

@@ -129,6 +129,10 @@ public sealed record UserSettings
     public bool OverlayClickThrough { get; init; }
     /// <summary>Altyazı penceresinin son yeri; null ise ana ekranın altında ortada açılır.</summary>
     public OverlayBounds? Overlay { get; init; }
+    /// <summary>Oyun paketlerindeki hazır Türkçe çeviriler kullanılır (yalnız İngilizce→Türkçe).</summary>
+    public bool GamePacks { get; init; } = true;
+    /// <summary>Pakette bulunmayan İngilizce satırlar ortak havuza gönderilir (anonim; bkz. <see cref="LinePool"/>).</summary>
+    public bool SharePool { get; init; } = LinePool.EnabledByDefault;
 
     /// <summary>Ayarlarda seçili motor: çevrimiçi çeviri kapalıysa ücretsiz olan.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -279,6 +283,12 @@ public interface IAppServices
     IUpdater? Updater => null;
     /// <summary>Windows Güvenlik Duvarı izni; Windows dışında ve testlerde null (hiçbir şey önerilmez).</summary>
     IFirewall? Firewall => null;
+    /// <summary>Oyun çeviri paketleri (uygulamayla gelenler ve kullanıcının klasöründekiler); bu derlemede yoksa null.</summary>
+    GamePackLibrary? GamePacks => null;
+    /// <summary>Satırın paketteki Türkçesi: konuşmacı etiketi, satır ve cümle parçalarıyla (CouchSubs.Translation.PackLookup).</summary>
+    PackMatch? FindInPacks(string text) => null;
+    /// <summary>Ortak havuz; testlerde null (hiçbir şey gönderilmez).</summary>
+    LinePool? Pool => null;
 }
 
 /// <param name="Launched">false ise TV uygulaması açılamadı; büyük olasılıkla TV'de kurulu değil.</param>

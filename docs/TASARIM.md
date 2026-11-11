@@ -116,6 +116,9 @@ seçimi, gizli anahtar alanı ve "Kaydet ve dene" (ikincil), anahtar sayfası ba
 Ücretsiz motor seçiliyken altında "Daha iyi çeviri için ücretsiz Gemini anahtarı alın." ve "Ücretsiz anahtar al"
 (ikincil; Gemini'yi seçer ve anahtar sayfasını açar) durur; Gemini seçiliyken veri kullanımı ve dakikalık sınır HintText'i görünür.
 Çevrimiçi motor çeviri sırasında hata verirse ana ekranda uyarı kartı çıkar.
+"Çeviri" kartının sonunda ayraçtan sonra "Oyun paketleri" (`headline`): "Oyun paketlerini kullan" anahtarı, HintText
+açıklama, kurulu paketler "Ad · n satır" (`body`); ikinci ayraçtan sonra "Okunan İngilizce altyazıları ortak havuza
+gönder" anahtarı (varsayılan açık) ve tek satırlık HintText. Kurulumun son adımında havuz bir HintText ile söylenir.
 
 Ayarların en üstünde ana ekrandaki "Altyazıyı göster" kartı açıklamalarıyla durur; altyazı bilgisayar ekranında
 da gösteriliyorsa "TV'de" kartının adı "Altyazı görünümü" olur (aynı ayarlar pencereye de uygulanır).

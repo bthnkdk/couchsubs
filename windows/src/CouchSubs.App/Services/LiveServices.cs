@@ -34,6 +34,11 @@ public sealed class LiveServices : IAppServices
     public IAudioOutput? Audio { get; } = new WindowsAudioOutput();
     public IUpdater? Updater { get; } = new Updater();
     public IFirewall? Firewall { get; } = new WindowsFirewall();
+    // Oyun paketleri: uygulamaya gömülü olanlar ve %LOCALAPPDATA%\CouchSubs\packs klasöründekiler.
+    public GamePackLibrary? GamePacks { get; } = new(GamePackLibrary.EmbeddedPacks, GamePackLibrary.UserDirectory);
+    public PackMatch? FindInPacks(string text) => GamePacks is { } packs ? PackLookup.Match(packs, text) : null;
+    public LinePool? Pool { get; } = new(Path.Combine(AppPaths.Data, "pool.json"),
+        AppVersion.Current(System.Reflection.Assembly.GetEntryAssembly() ?? typeof(LiveServices).Assembly));
 
     public Task<IReadOnlyList<ConsoleInfo>> DiscoverConsolesAsync() => ConsoleDiscovery.DiscoverAsync();
 

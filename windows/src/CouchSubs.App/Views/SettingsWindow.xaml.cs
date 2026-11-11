@@ -53,6 +53,9 @@ public partial class SettingsWindow : Window
         Closed += (_, _) => controller.PropertyChanged -= OnControllerChanged;
         Engine.SelectedItem = Engine.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Engine.ToString());
         ShowEngine();
+        GamePacks.IsChecked = settings.GamePacks;
+        SharePool.IsChecked = settings.SharePool;
+        ShowPacks();
         loading = false;
     }
 
@@ -64,6 +67,23 @@ public partial class SettingsWindow : Window
     /// <summary>Altyazı bilgisayar ekranında da gösteriliyorsa görünüm kartı yalnız TV'ye ait değildir.</summary>
     private void ShowStyleTitle() =>
         StyleCard.Title = Localizer.Current[controller.Settings.Output == SubtitleOutput.Tv ? "On the TV" : "Subtitle appearance"];
+    /// <summary>Kurulu oyun paketleri: ad ve satır sayısı.</summary>
+    private void ShowPacks()
+    {
+        var text = Localizer.Current;
+        PackList.Items.Clear();
+        if (controller.InstalledPacks.Count == 0)
+        {
+            PackList.Items.Add(new TextBlock { Text = text["No game pack is installed."], Style = (Style)FindResource("HintText"), TextWrapping = TextWrapping.Wrap });
+            return;
+        }
+        foreach (var pack in controller.InstalledPacks)
+            PackList.Items.Add(new TextBlock { Text = text.Format("%1$@ · %2$@ lines", pack.Title, pack.Entries.ToString("N0")), Margin = new Thickness(0, 0, 0, 4) });
+    }
+
+    private void OnGamePacks(object sender, RoutedEventArgs e) => Update(s => s with { GamePacks = GamePacks.IsChecked == true });
+
+    private void OnSharePool(object sender, RoutedEventArgs e) => Update(s => s with { SharePool = SharePool.IsChecked == true });
 
     /// <summary>Seçili motor (ayarlarda ücretsiz ise Free).</summary>
     private TranslationEngine SelectedEngine =>
