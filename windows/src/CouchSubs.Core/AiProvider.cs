@@ -50,6 +50,9 @@ public static class AiProviders
     /// <summary>Kayıtlı model listede yoksa (eski ayar ya da listeden çıkarılan model) varsayılan model.</summary>
     public static AiModel Model(this AiProvider provider, string? id) =>
         provider.Models().FirstOrDefault(m => m.Id == id) ?? provider.DefaultModel();
+
+    /// <summary>Ücretsiz anahtarla kullanılabilen bir modeli var mı (bugün yalnız Gemini).</summary>
+    public static bool HasFreeTier(this AiProvider provider) => provider.Models().Any(m => m.FreeTier);
 }
 
 /// <summary>
@@ -59,11 +62,23 @@ public static class AiProviders
 /// <param name="Label">Ayarlarda görünen ad (Localizable.xcstrings anahtarı).</param>
 /// <param name="Effort">OpenAI'da <c>reasoning_effort</c>, Claude'da <c>output_config.effort</c>; null ise gönderilmez.</param>
 /// <param name="Thinking">Gemini'de <c>thinkingConfig.thinkingLevel</c>, Claude'da <c>thinking.type</c>; null ise gönderilmez.</param>
+/// <param name="FreeTier">
+/// Ücretsiz anahtarla (faturası bağlanmamış Google projesi) kullanılabilir mi: Kasım 2026'da
+/// aistudio.google.com/docs/pricing sayfasında "Free Tier: Free of charge" yazan modeller.
+/// </param>
+/// <param name="RequestsPerMinute">
+/// Dakikada en çok bu kadar istek gönderilir; hak bitince o satır yerel çeviriyle çevrilir. null ise sınır yok. Google
+/// ücretsiz katmanın model başına sayılarını belgelerde yazmıyor (aistudio.google.com/docs/rate-limits: "Rate limits are
+/// applied per project, not per API key"; sayılar yalnız aistudio.google.com/rate-limit'te). Değer temkinli seçildi;
+/// hizmet 429 ile daha düşük sınır bildirirse o sınıra inilir.
+/// </param>
 public sealed record AiModel(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("label")] string Label,
     [property: JsonPropertyName("effort")] string? Effort = null,
-    [property: JsonPropertyName("thinking")] string? Thinking = null)
+    [property: JsonPropertyName("thinking")] string? Thinking = null,
+    [property: JsonPropertyName("freeTier")] bool FreeTier = false,
+    [property: JsonPropertyName("requestsPerMinute")] int? RequestsPerMinute = null)
 {
     /// <summary><c>ai-models.json</c>: hizmet adı → modeller.</summary>
     internal static readonly IReadOnlyDictionary<string, IReadOnlyList<AiModel>> Catalog = Load();
@@ -87,7 +102,10 @@ public sealed record AiModel(
             var models = property.Value.EnumerateArray().Select(item => new AiModel(
                 item.GetProperty("id").GetString()!, item.GetProperty("label").GetString()!,
                 item.TryGetProperty("effort", out var effort) ? effort.GetString() : null,
-                item.TryGetProperty("thinking", out var thinking) ? thinking.GetString() : null)).ToList();
+                item.TryGetProperty("thinking", out var thinking) ? thinking.GetString() : null,
+                // Yeni alanlar eksikse varsayılanla okunur.
+                item.TryGetProperty("freeTier", out var free) && free.ValueKind == System.Text.Json.JsonValueKind.True,
+                item.TryGetProperty("requestsPerMinute", out var rpm) && rpm.TryGetInt32(out var perMinute) ? perMinute : null)).ToList();
             if (models.Count > 0) result[property.Name] = models;
         }
         return result;

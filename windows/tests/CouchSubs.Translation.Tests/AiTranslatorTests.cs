@@ -91,8 +91,16 @@ public class AiTranslatorTests
 
     private static HttpResponseMessage Echo(HttpRequestMessage request, string body) => Wrap(request, EchoText(UserText(request, body)));
 
-    private static AiTranslator Make(AiProvider provider, FakeAi fake, ITextTranslator? local = null, TranslationCache? cache = null, string? model = null) =>
-        new(provider, $"  {Secret} ", model, local ?? new FakeLocal(), new HttpClient(fake), cache);
+    /// <summary>Her çevirmen kendi dakikalık hakkıyla kurulur; testler uygulamanın ortak hakkını tüketmesin.</summary>
+    private static AiTranslator Make(AiProvider provider, FakeAi fake, ITextTranslator? local = null, TranslationCache? cache = null, string? model = null,
+                                     RequestBudget? budget = null) =>
+        new(provider, $"  {Secret} ", model, local ?? new FakeLocal(), new HttpClient(fake), cache, budget ?? new RequestBudget(1000));
+
+    /// <summary>Gemini'nin dakikalık sınır yanıtı (error.details içinde QuotaFailure ve RetryInfo).</summary>
+    private static string RateLimitBody(string quotaId, string value = "5", string delay = "3s") =>
+        $$$"""{"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"{{{quotaId}}}","quotaValue":"{{{value}}}"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"{{{delay}}}"}]}}""";
+
+    private const string PerMinute = "GenerateRequestsPerMinutePerProjectPerModel-FreeTier";
 
     private static string User(FakeAi fake, int index) => UserText(fake.Requests[index].Request, fake.Requests[index].Body);
 
@@ -206,7 +214,8 @@ public class AiTranslatorTests
             // Etiketler ortak metin dosyasında çevrilmiş olmalı.
             Assert.NotEqual(provider.DefaultModel().Label, Localizer.ForLanguage("tr")[provider.DefaultModel().Label]);
         }
-        Assert.Equal(new AiModel("gemini-3.5-flash-lite", "Fast and cheap (recommended)"), AiProvider.Gemini.DefaultModel());
+        Assert.Equal(new AiModel("gemini-3.5-flash-lite", "Fast and cheap (recommended)", FreeTier: true, RequestsPerMinute: 15),
+                     AiProvider.Gemini.DefaultModel());
         Assert.Equal("disabled", AiProvider.Claude.DefaultModel().Thinking);
     }
 
@@ -305,6 +314,139 @@ public class AiTranslatorTests
         var translator = Make(AiProvider.Claude, fake);
         Assert.Equal("yerel: Run!", await translator.TranslateAsync("Run!"));
         Assert.Equal(OnlineKeyState.Unreachable, translator.LastError);
+    }
+
+    // --- Ücretsiz katman ---
+
+    /// <summary>Varsayılan Gemini modeli ücretsiz anahtarla çalışır ve dakikalık hakkı vardır; ücretli hizmetlerde hak yoktur.</summary>
+    [Fact]
+    public void DefaultGeminiModelIsFreeTier()
+    {
+        var model = AiProvider.Gemini.DefaultModel();
+        Assert.True(model.FreeTier);
+        Assert.NotNull(model.RequestsPerMinute);
+        Assert.All(AiProvider.Gemini.Models(), m => Assert.True(m.FreeTier && m.RequestsPerMinute > 0));
+        Assert.True(AiProvider.Gemini.HasFreeTier());
+        Assert.False(AiProvider.OpenAi.HasFreeTier());
+        Assert.False(AiProvider.Claude.HasFreeTier());
+        Assert.Null(RequestBudget.Shared(AiProvider.Claude, AiProvider.Claude.DefaultModel()));
+        var shared = RequestBudget.Shared(AiProvider.Gemini, model);
+        Assert.Equal(model.RequestsPerMinute, shared?.PerMinute);
+        // Hat yeniden kurulsa da aynı hak kullanılır.
+        Assert.Same(shared, RequestBudget.Shared(AiProvider.Gemini, model));
+        // Eski listede yeni alanlar olmayabilir.
+        var old = AiModel.Parse("""{"gemini":[{"id":"g","label":"L"}]}""")["gemini"][0];
+        Assert.Equal(new AiModel("g", "L"), old);
+        Assert.False(old.FreeTier);
+    }
+
+    /// <summary>Kayan bir dakikalık pencere: hak bitince istek verilmez, en eski istek pencereden çıkınca yeniden verilir.</summary>
+    [Fact]
+    public void RequestBudgetSlidingWindow()
+    {
+        var time = new DateTimeOffset(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
+        var budget = new RequestBudget(3, () => time);
+        Assert.True(budget.TryTake());
+        time += TimeSpan.FromSeconds(20);
+        Assert.True(budget.TryTake());
+        Assert.True(budget.TryTake());
+        Assert.False(budget.TryTake());
+        time += TimeSpan.FromSeconds(39);
+        Assert.False(budget.TryTake());
+        time += TimeSpan.FromSeconds(1); // ilk istek 60 sn önceydi
+        Assert.True(budget.TryTake());
+        Assert.False(budget.TryTake());
+        budget.Lower(1);
+        Assert.Equal(1, budget.PerMinute);
+        budget.Lower(50); // yükseltmez
+        Assert.Equal(1, budget.PerMinute);
+        budget.Lower(0);
+        Assert.Equal(1, budget.PerMinute);
+    }
+
+    /// <summary>Hak bitince istek gönderilmez, satır yerel çeviriyle gelir; hata bildirilmez, önbellekteki satır yine gelir.</summary>
+    [Fact]
+    public async Task OverBudgetFallsBackSilently()
+    {
+        var fake = new FakeAi();
+        var translator = Make(AiProvider.Gemini, fake, budget: new RequestBudget(1));
+        var reported = new List<OnlineKeyState?>();
+        translator.FailureChanged += reported.Add;
+        Assert.Equal("[tr] Run!", await translator.TranslateAsync("Run!"));
+        Assert.False(translator.LastLineWasRateLimited);
+        Assert.Equal("yerel: Hide!", await translator.TranslateAsync("Hide!"));
+        Assert.True(translator.LastLineWasRateLimited);
+        Assert.Single(fake.Requests);
+        Assert.Null(translator.LastError);
+        Assert.Empty(reported);
+        // Önbellekteki satır hak harcamadan gelir.
+        Assert.Equal("[tr] Run!", await translator.TranslateAsync("Run!"));
+        Assert.Single(fake.Requests);
+    }
+
+    /// <summary>Bir altyazının bütün cümleleri tek istekle gider; hak cümle başına değil istek başına sayılır.</summary>
+    [Fact]
+    public async Task WholeSubtitleUsesOneRequestOfTheBudget()
+    {
+        var fake = new FakeAi();
+        var translator = Make(AiProvider.Gemini, fake, budget: new RequestBudget(1));
+        Assert.Equal("[tr] We go now. [tr] Stay close. [tr] Run!", await translator.TranslateAsync("We go now. Stay close. Run!"));
+        Assert.Single(fake.Requests);
+    }
+
+    /// <summary>Dakikalık 429: uyarı çıkmaz, kısa beklenir, bildirilen daha düşük sınıra inilir.</summary>
+    [Fact]
+    public async Task PerMinuteRateLimitIsSilentAndLowersTheBudget()
+    {
+        var fake = new FakeAi((_, _) => Json(RateLimitBody(PerMinute), HttpStatusCode.TooManyRequests));
+        var budget = new RequestBudget(15);
+        var translator = Make(AiProvider.Gemini, fake, budget: budget);
+        var reported = new List<OnlineKeyState?>();
+        translator.FailureChanged += reported.Add;
+        Assert.Equal("yerel: Run!", await translator.TranslateAsync("Run!"));
+        Assert.Equal("yerel: Hide!", await translator.TranslateAsync("Hide!"));
+        Assert.Single(fake.Requests);
+        Assert.Null(translator.LastError);
+        Assert.Empty(reported);
+        Assert.True(translator.LastLineWasRateLimited);
+        Assert.Equal(5, budget.PerMinute);
+    }
+
+    /// <summary>Günlük sınır dolunca kullanıcıya söylenir (dakikalık beklemeyle geçmez).</summary>
+    [Fact]
+    public async Task PerDayLimitIsReported()
+    {
+        var fake = new FakeAi((_, _) => Json(RateLimitBody("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "1000"), HttpStatusCode.TooManyRequests));
+        var translator = Make(AiProvider.Gemini, fake);
+        var reported = new List<OnlineKeyState?>();
+        translator.FailureChanged += reported.Add;
+        await translator.TranslateAsync("Run!");
+        Assert.Equal([OnlineKeyState.QuotaExceeded], reported);
+    }
+
+    [Fact]
+    public void RateLimitParsing()
+    {
+        Assert.Equal(new AiRateLimit(TimeSpan.FromSeconds(37.5), 10),
+                     AiRequest.RateLimit(HttpStatusCode.TooManyRequests, RateLimitBody(PerMinute, "10", "37.5s")));
+        // Token sınırı da dakikalıktır ama istek sınırını bildirmez.
+        Assert.Equal(new AiRateLimit(TimeSpan.FromSeconds(3), null),
+                     AiRequest.RateLimit(HttpStatusCode.TooManyRequests, RateLimitBody("GenerateContentInputTokensPerModelPerMinute-FreeTier", "250000")));
+        Assert.Null(AiRequest.RateLimit(HttpStatusCode.TooManyRequests, RateLimitBody("GenerateRequestsPerDayPerProjectPerModel-FreeTier")));
+        Assert.Null(AiRequest.RateLimit(HttpStatusCode.TooManyRequests, """{"error":{"message":"quota"}}"""));
+        Assert.Null(AiRequest.RateLimit(HttpStatusCode.BadRequest, RateLimitBody(PerMinute)));
+        Assert.Null(AiRequest.RateLimit(HttpStatusCode.TooManyRequests, ""));
+        // Ayrıntısız 429 eskisi gibi kota hatasıdır.
+        Assert.Equal(OnlineKeyState.QuotaExceeded, AiRequest.Failure(HttpStatusCode.TooManyRequests, ""));
+    }
+
+    /// <summary>"Kaydet ve dene" dakikalık sınıra takılırsa anahtar geçerlidir ama sınırdadır (kaydedilir).</summary>
+    [Fact]
+    public async Task TestReportsRateLimitAsQuota()
+    {
+        var fake = new FakeAi((_, _) => Json(RateLimitBody(PerMinute), HttpStatusCode.TooManyRequests));
+        var result = await AiTranslator.TestAsync(AiProvider.Gemini, Secret, null, new HttpClient(fake));
+        Assert.Equal(OnlineKeyState.QuotaExceeded, result.State);
     }
 
     // --- Önbellek ---

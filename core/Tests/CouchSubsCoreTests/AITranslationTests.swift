@@ -98,8 +98,15 @@ final class AITranslationTests: XCTestCase {
         FakeAI.replyText = nil
     }
 
-    private func make(_ provider: AIProvider, cache: TranslationCache = TranslationCache(), model: String? = nil) -> AITranslationCore {
-        AITranslationCore(provider: provider, key: "  \(secret) ", model: model, session: FakeAI.session(), cache: cache)
+    /// Her çevirmen kendi dakikalık hakkıyla kurulur; testler uygulamanın ortak hakkını tüketmesin.
+    private func make(_ provider: AIProvider, cache: TranslationCache = TranslationCache(), model: String? = nil,
+                      budget: RequestBudget = RequestBudget(perMinute: 1000)) -> AITranslationCore {
+        AITranslationCore(provider: provider, key: "  \(secret) ", model: model, session: FakeAI.session(), cache: cache, budget: budget)
+    }
+
+    /// Gemini'nin dakikalık sınır yanıtı (error.details içinde QuotaFailure ve RetryInfo).
+    private func rateLimitBody(quotaId: String, value: String = "5", delay: String = "3s") -> String {
+        #"{"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"\#(quotaId)","quotaValue":"\#(value)"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"\#(delay)"}]}}"#
     }
 
     private func local(_ text: String) async throws -> String { "yerel: " + text }
@@ -189,7 +196,8 @@ final class AITranslationTests: XCTestCase {
             XCTAssertEqual(provider.defaultModel.label, "Fast and cheap (recommended)")
             XCTAssertEqual(Set(provider.models.map(\.id)).count, provider.models.count)
         }
-        XCTAssertEqual(AIProvider.gemini.defaultModel, AIModel(id: "gemini-3.5-flash-lite", label: "Fast and cheap (recommended)"))
+        XCTAssertEqual(AIProvider.gemini.defaultModel, AIModel(id: "gemini-3.5-flash-lite", label: "Fast and cheap (recommended)",
+                                                               freeTier: true, requestsPerMinute: 15))
         XCTAssertEqual(AIProvider.claude.defaultModel.thinking, "disabled")
         // Depodaki dosya, uygulamaya giden kopyayla aynıdır; Windows da bu dosyayı gömer.
         let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -276,6 +284,129 @@ final class AITranslationTests: XCTestCase {
         let result = try await translator.translate("Run!", fallback: local)
         XCTAssertEqual(result, "yerel: Run!")
         XCTAssertEqual(translator.lastFailure, .unreachable)
+    }
+
+    // MARK: - Ücretsiz katman
+
+    /// Varsayılan Gemini modeli ücretsiz anahtarla çalışır ve dakikalık hakkı vardır; ücretli hizmetlerde hak yoktur.
+    func testDefaultGeminiModelIsFreeTier() {
+        let model = AIProvider.gemini.defaultModel
+        XCTAssertTrue(model.freeTier)
+        XCTAssertNotNil(model.requestsPerMinute)
+        XCTAssertTrue(AIProvider.gemini.models.allSatisfy { $0.freeTier && ($0.requestsPerMinute ?? 0) > 0 })
+        XCTAssertTrue(AIProvider.gemini.hasFreeTier)
+        XCTAssertFalse(AIProvider.openAI.hasFreeTier)
+        XCTAssertFalse(AIProvider.claude.hasFreeTier)
+        XCTAssertNil(RequestBudget.shared(provider: .claude, model: AIProvider.claude.defaultModel))
+        let shared = RequestBudget.shared(provider: .gemini, model: model)
+        XCTAssertEqual(shared?.perMinute, model.requestsPerMinute)
+        // Hat yeniden kurulsa da aynı hak kullanılır.
+        XCTAssertTrue(shared === RequestBudget.shared(provider: .gemini, model: model))
+        // Eski listede yeni alanlar olmayabilir.
+        let old = AIModel.parse(Data(#"{"gemini":[{"id":"g","label":"L"}]}"#.utf8))["gemini"]?.first
+        XCTAssertEqual(old, AIModel(id: "g", label: "L"))
+        XCTAssertEqual(old?.freeTier, false)
+    }
+
+    /// Kayan bir dakikalık pencere: hak bitince istek verilmez, en eski istek pencereden çıkınca yeniden verilir.
+    func testRequestBudgetSlidingWindow() {
+        var time = Date(timeIntervalSince1970: 1000)
+        let budget = RequestBudget(perMinute: 3) { time }
+        XCTAssertTrue(budget.take())
+        time += 20
+        XCTAssertTrue(budget.take())
+        XCTAssertTrue(budget.take())
+        XCTAssertFalse(budget.take())
+        time += 39
+        XCTAssertFalse(budget.take())
+        time += 1  // ilk istek 60 sn önceydi
+        XCTAssertTrue(budget.take())
+        XCTAssertFalse(budget.take())
+        budget.lower(to: 1)
+        XCTAssertEqual(budget.perMinute, 1)
+        budget.lower(to: 50)  // yükseltmez
+        XCTAssertEqual(budget.perMinute, 1)
+        budget.lower(to: 0)
+        XCTAssertEqual(budget.perMinute, 1)
+    }
+
+    /// Hak bitince istek gönderilmez, satır yerel çeviriyle gelir; hata bildirilmez, önbellekteki satır yine gelir.
+    func testOverBudgetFallsBackSilently() async throws {
+        let translator = make(.gemini, budget: RequestBudget(perMinute: 1))
+        var reported: [AIFailure?] = []
+        translator.onFailureChanged = { reported.append($0) }
+        let first = try await translator.translate("Run!", fallback: local)
+        XCTAssertFalse(translator.lastLineWasRateLimited)
+        let second = try await translator.translate("Hide!", fallback: local)
+        XCTAssertEqual(first, "[tr] Run!")
+        XCTAssertEqual(second, "yerel: Hide!")
+        XCTAssertTrue(translator.lastLineWasRateLimited)
+        XCTAssertEqual(FakeAI.requests.count, 1)
+        XCTAssertNil(translator.lastFailure)
+        XCTAssertTrue(reported.isEmpty)
+        // Önbellekteki satır hak harcamadan gelir.
+        let again = try await translator.translate("Run!", fallback: local)
+        XCTAssertEqual(again, "[tr] Run!")
+        XCTAssertEqual(FakeAI.requests.count, 1)
+    }
+
+    /// Bir altyazının bütün cümleleri tek istekle gider; hak cümle başına değil istek başına sayılır.
+    func testWholeSubtitleUsesOneRequestOfTheBudget() async throws {
+        let translator = make(.gemini, budget: RequestBudget(perMinute: 1))
+        let result = try await translator.translate("We go now. Stay close. Run!", fallback: local)
+        XCTAssertEqual(result, "[tr] We go now. [tr] Stay close. [tr] Run!")
+        XCTAssertEqual(FakeAI.requests.count, 1)
+    }
+
+    /// Dakikalık 429: uyarı çıkmaz, kısa beklenir, bildirilen daha düşük sınıra inilir.
+    func testPerMinuteRateLimitIsSilentAndLowersTheBudget() async throws {
+        FakeAI.failure = (429, rateLimitBody(quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"))
+        let budget = RequestBudget(perMinute: 15)
+        let translator = make(.gemini, budget: budget)
+        var reported: [AIFailure?] = []
+        translator.onFailureChanged = { reported.append($0) }
+        let first = try await translator.translate("Run!", fallback: local)
+        let second = try await translator.translate("Hide!", fallback: local)
+        XCTAssertEqual(first, "yerel: Run!")
+        XCTAssertEqual(second, "yerel: Hide!")
+        XCTAssertEqual(FakeAI.requests.count, 1)
+        XCTAssertNil(translator.lastFailure)
+        XCTAssertTrue(reported.isEmpty)
+        XCTAssertTrue(translator.lastLineWasRateLimited)
+        XCTAssertEqual(budget.perMinute, 5)
+    }
+
+    /// Günlük sınır dolunca kullanıcıya söylenir (dakikalık beklemeyle geçmez).
+    func testPerDayLimitIsReported() async throws {
+        FakeAI.failure = (429, rateLimitBody(quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier", value: "1000"))
+        let translator = make(.gemini)
+        var reported: [AIFailure?] = []
+        translator.onFailureChanged = { reported.append($0) }
+        _ = try await translator.translate("Run!", fallback: local)
+        XCTAssertEqual(reported, [.quotaExceeded])
+    }
+
+    func testRateLimitParsing() {
+        let minute = AIRequest.rateLimit(status: 429, body: Data(rateLimitBody(quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier",
+                                                                              value: "10", delay: "37.5s").utf8))
+        XCTAssertEqual(minute, AIRateLimit(retryAfter: 37.5, requestsPerMinute: 10))
+        // Token sınırı da dakikalıktır ama istek sınırını bildirmez.
+        let tokens = AIRequest.rateLimit(status: 429, body: Data(rateLimitBody(quotaId: "GenerateContentInputTokensPerModelPerMinute-FreeTier",
+                                                                              value: "250000").utf8))
+        XCTAssertEqual(tokens, AIRateLimit(retryAfter: 3, requestsPerMinute: nil))
+        XCTAssertNil(AIRequest.rateLimit(status: 429, body: Data(rateLimitBody(quotaId: "GenerateRequestsPerDayPerProjectPerModel-FreeTier").utf8)))
+        XCTAssertNil(AIRequest.rateLimit(status: 429, body: Data(#"{"error":{"message":"quota"}}"#.utf8)))
+        XCTAssertNil(AIRequest.rateLimit(status: 400, body: Data(rateLimitBody(quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier").utf8)))
+        XCTAssertNil(AIRequest.rateLimit(status: 429, body: Data()))
+        // Ayrıntısız 429 eskisi gibi kota hatasıdır.
+        XCTAssertEqual(AIRequest.failure(status: 429, body: Data()), .quotaExceeded)
+    }
+
+    /// "Kaydet ve dene" dakikalık sınıra takılırsa anahtar geçerlidir ama sınırdadır (kaydedilir).
+    func testTestReportsRateLimitAsQuota() async {
+        FakeAI.failure = (429, rateLimitBody(quotaId: "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"))
+        let result = await AITranslationCore.test(provider: .gemini, key: secret, model: nil, session: FakeAI.session())
+        XCTAssertEqual(result, .failure(.quotaExceeded))
     }
 
     // MARK: - Önbellek
