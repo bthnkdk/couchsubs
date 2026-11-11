@@ -23,7 +23,22 @@ public static class StoreKeys
     public const string GeminiKey = "geminiKey";
     public const string OpenAiKey = "openAIKey";
     public const string ClaudeKey = "claudeKey";
+    /// <summary>Kurulum sihirbazı bitti. TV'siz kurulumda (altyazı bilgisayar ekranında) ana ekranı bu açar.</summary>
+    public const string SetupComplete = "setupComplete";
 }
+
+/// <summary>Altyazının gösterileceği yer (Mac'teki SubtitleOutput ile aynı).</summary>
+[System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter<SubtitleOutput>))]
+public enum SubtitleOutput { Tv, Computer, Both }
+
+public static class SubtitleOutputs
+{
+    public static bool ShowsOnTv(this SubtitleOutput output) => output != SubtitleOutput.Computer;
+    public static bool ShowsOnComputer(this SubtitleOutput output) => output != SubtitleOutput.Tv;
+}
+
+/// <summary>Bilgisayar ekranındaki altyazı penceresinin yeri ve genişliği (WPF birimiyle; tüm ekranları kapsayan düzlemde).</summary>
+public sealed record OverlayBounds(double Left, double Top, double Width);
 
 /// <summary>
 /// Ayarlardaki çeviri motoru seçimi. Ücretsiz olan cihaz üstü modeldir; diğerleri kullanıcının kendi anahtarıyla çalışır
@@ -108,6 +123,12 @@ public sealed record UserSettings
     public string GeminiModel { get; init; } = AiProvider.Gemini.DefaultModel().Id;
     public string OpenAiModel { get; init; } = AiProvider.OpenAi.DefaultModel().Id;
     public string ClaudeModel { get; init; } = AiProvider.Claude.DefaultModel().Id;
+    /// <summary>Altyazı TV'de mi, bilgisayar ekranındaki pencerede mi, ikisinde de mi. Eski kayıtlar TV ile açılır.</summary>
+    public SubtitleOutput Output { get; init; } = SubtitleOutput.Tv;
+    /// <summary>Bilgisayar ekranındaki altyazı penceresi tıklamaları alttaki pencereye (oyun, PS Remote Play) geçirir.</summary>
+    public bool OverlayClickThrough { get; init; }
+    /// <summary>Altyazı penceresinin son yeri; null ise ana ekranın altında ortada açılır.</summary>
+    public OverlayBounds? Overlay { get; init; }
 
     /// <summary>Ayarlarda seçili motor: çevrimiçi çeviri kapalıysa ücretsiz olan.</summary>
     [System.Text.Json.Serialization.JsonIgnore]

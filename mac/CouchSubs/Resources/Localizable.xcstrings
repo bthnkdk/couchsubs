@@ -4880,6 +4880,310 @@
           }
         }
       }
+    },
+    "Show subtitles on": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show subtitles on"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Altyazıyı göster"
+          }
+        }
+      }
+    },
+    "Computer screen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Computer screen"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bilgisayar ekranı"
+          }
+        }
+      }
+    },
+    "Both": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Both"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "İkisi de"
+          }
+        }
+      }
+    },
+    "Subtitles appear in a window on this computer, over the game or PS Remote Play.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subtitles appear in a window on this computer, over the game or PS Remote Play."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Altyazı bu bilgisayarda, oyunun ya da PS Remote Play'in üstünde bir pencerede görünür."
+          }
+        }
+      }
+    },
+    "Clicks pass through": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Clicks pass through"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tıklamalar geçsin"
+          }
+        }
+      }
+    },
+    "Adjust the subtitle window": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adjust the subtitle window"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Altyazı penceresini ayarla"
+          }
+        }
+      }
+    },
+    "When on, clicks go through to the window below. Press ⌥⌘L or use the menu bar to turn it off.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When on, clicks go through to the window below. Press ⌥⌘L or use the menu bar to turn it off."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Açıkken tıklamalar alttaki pencereye geçer. Kapatmak için ⌥⌘L'ye basın ya da menü çubuğunu kullanın."
+          }
+        }
+      }
+    },
+    "When on, clicks go through to the window below. Press Num 7 to turn it off.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When on, clicks go through to the window below. Press Num 7 to turn it off."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Açıkken tıklamalar alttaki pencereye geçer. Kapatmak için Num 7'ye basın."
+          }
+        }
+      }
+    },
+    "Subtitle appearance": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subtitle appearance"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Altyazı görünümü"
+          }
+        }
+      }
+    },
+    "Not set up": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not set up"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kurulmadı"
+          }
+        }
+      }
+    },
+    "Connect a TV": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect a TV"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV bağla"
+          }
+        }
+      }
+    },
+    "No TV? Show on the computer screen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No TV? Show on the computer screen"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TV'm yok, bilgisayar ekranında göster"
+          }
+        }
+      }
+    },
+    "Subtitles appear in a window over the game or PS Remote Play. You can connect a TV later.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subtitles appear in a window over the game or PS Remote Play. You can connect a TV later."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Altyazı oyunun ya da PS Remote Play'in üstünde bir pencerede görünür. TV'yi sonra da bağlayabilirsiniz."
+          }
+        }
+      }
+    },
+    "CouchSubs will show a sample subtitle on this computer's screen, at the bottom.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CouchSubs will show a sample subtitle on this computer's screen, at the bottom."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CouchSubs bu bilgisayarın ekranında, altta örnek bir altyazı gösterecek."
+          }
+        }
+      }
+    },
+    "Do you see it on the screen?": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Do you see it on the screen?"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ekranda görüyor musunuz?"
+          }
+        }
+      }
+    },
+    "If you don't see it, send it again. It shows for a few seconds at the bottom of the screen.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If you don't see it, send it again. It shows for a few seconds at the bottom of the screen."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Görmüyorsanız yeniden gönderin. Altyazı ekranın altında birkaç saniye görünür."
+          }
+        }
+      }
+    },
+    "Subtitles appear here.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Subtitles appear here."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Altyazı burada görünecek."
+          }
+        }
+      }
+    },
+    "Drag to move, drag the edges to resize.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Drag to move, drag the edges to resize."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sürükleyerek taşıyın, kenarlardan genişletin."
+          }
+        }
+      }
+    },
+    "Open CouchSubs": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open CouchSubs"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "CouchSubs'ı aç"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

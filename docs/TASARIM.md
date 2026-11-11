@@ -99,7 +99,9 @@ Her iki platformda aynı adla bulunur.
 
 **Ana ekran** (yukarıdan aşağı): logo + "CouchSubs" + sağda ayar simgesi; tam genişlikte
 "Çeviriyi başlat" (birincil) ya da "Çeviriyi durdur" (tehlikeli); PS5 ve TV durumlarını gösteren
-kart; gerekiyorsa dil paketi uyarı kartı; "Son altyazı" kartında `title` boyutunda çeviri, altında
+kart (altyazı yalnız bilgisayar ekranındaysa TV satırı yoktur; TV seçili ama bağlı değilse "Kurulmadı" ve "TV bağla");
+"Altyazıyı göster: TV / Bilgisayar ekranı / İkisi de" bölmeli seçimi olan kart (bilgisayar ekranı seçiliyse
+"Tıklamalar geçsin" ve "Altyazı penceresini ayarla"); gerekiyorsa dil paketi uyarı kartı; "Son altyazı" kartında `title` boyutunda çeviri, altında
 `callout` boyutunda özgün metin.
 
 **Ayarlar**: `title` başlık; sırasıyla "TV'de" (yazı boyutu, ekrandaki konum, test altyazısı),
@@ -109,6 +111,20 @@ seçimi, gizli anahtar alanı ve "Kaydet ve dene" (ikincil), anahtar sayfası ba
 "Dene" ve "Anahtarı sil" (ikincil). Model yazılamaz; "Model" seçiminde yalnız ortak listedeki modeller
 (`core/Sources/CouchSubsCore/Resources/ai-models.json`) sade adlarıyla görünür. Sonuç HintText, hata ErrorText olur.
 Çevrimiçi motor çeviri sırasında hata verirse ana ekranda uyarı kartı çıkar.
+
+Ayarların en üstünde ana ekrandaki "Altyazıyı göster" kartı açıklamalarıyla durur; altyazı bilgisayar ekranında
+da gösteriliyorsa "TV'de" kartının adı "Altyazı görünümü" olur (aynı ayarlar pencereye de uygulanır).
+
+**Kurulum, TV adımı**: TV aramasının altında "TV'm yok, bilgisayar ekranında göster" kartı (ikincil "Seç"). Seçilince
+TV kurulumu atlanır, deneme adımı örnek altyazıyı bilgisayar ekranında gösterir.
+
+**Bilgisayar ekranındaki altyazı penceresi**: kenarsız, saydam zeminli, her pencerenin (tam ekran oyun ve PS Remote
+Play dahil) üstünde; odağı almaz, görev çubuğunda / Dock'ta görünmez. Altyazı kutusu TV'dekinin aynısıdır (yazı boyu
+1080 satırlık ekrana göre ölçeklenir, beyaz ya da sarı yazı, siyah yarı saydam zemin, üstteki satırlar küçük ve soluk,
+en çok üç satır). Altyazı yokken pencere gizlenir. "Tıklamalar geçsin" kapalıyken yazıdan tutup sürüklenir; açıkken
+fare alttaki pencereye gider, geri almak için Mac'te ⌥⌘L ya da menü çubuğundaki CouchSubs simgesi, Windows'ta Num 7
+ya da ana ekran. "Altyazı penceresini ayarla": `accent` kesik çizgili çerçeve, üstte açıklama ve "Bitti" (birincil),
+iki yanda genişletme tutamakları; yer, genişlik ve ekran hatırlanır.
 
 **Hakkında**: 88 pt logo, ad, sürüm, lisans, teşekkür, bağlantılar, Sony ile ilişkisizlik notu.
 

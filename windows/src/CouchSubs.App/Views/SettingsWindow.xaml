@@ -15,7 +15,9 @@
         </Border>
         <ScrollViewer VerticalScrollBarVisibility="Visible">
             <StackPanel Margin="32,0,32,24">
-                <c:Card Title="{t:T 'On the TV'}">
+                <local:SubtitleOutputCard x:Name="OutputCard" Detailed="True" Margin="0,0,0,16" />
+                <!-- Görünüm ayarları bilgisayar ekranındaki pencereye de uygulanır. -->
+                <c:Card x:Name="StyleCard" Title="{t:T 'On the TV'}">
                     <StackPanel>
                         <TextBlock Text="{t:T 'Text size'}" Margin="0,0,0,8" />
                         <Grid Margin="0,0,0,16">

@@ -51,6 +51,14 @@ public interface ISubtitleSender
     void Clear();
 }
 
+public enum SubtitleEventKind { Subtitle, Clear }
+
+/// <summary>Sunucudan geçen ve bilgisayar ekranındaki altyazı penceresinin de gösterdiği olay.</summary>
+public sealed record SubtitleEvent(SubtitleEventKind Kind, string Text = "", int DurationMs = 0, bool Paragraphs = false)
+{
+    public static readonly SubtitleEvent Cleared = new(SubtitleEventKind.Clear);
+}
+
 /// <summary>
 /// TV uygulamasının bağlandığı yerel Server-Sent Events sunucusu.
 /// <c>GET /events</c> akışında <c>subtitle</c>, <c>clear</c> ve <c>style</c> olaylarını yayınlar.
@@ -91,6 +99,15 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
 
     /// <summary>Bağlı TV sayısı değişince çağrılır (iş parçacığı havuzunda).</summary>
     public event Action<int>? ClientsChanged;
+
+    /// <summary>
+    /// Altyazı ve temizleme olayları gönderildiği anda buraya da verilir (çağıranın iş parçacığında). Bilgisayar
+    /// ekranındaki pencere TV'ye gidenin aynısını gösterir; sunucu başlamamış olsa da çalışır.
+    /// </summary>
+    public event Action<SubtitleEvent>? EventSent;
+
+    /// <summary>false ise altyazı olayları TV'lere gitmez (altyazı yalnız bilgisayar ekranında); OBS katmanı almaya devam eder.</summary>
+    public bool SendsToTv { get; set; } = true;
 
     public int ConnectedClients
     {
@@ -153,7 +170,8 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
         };
         if (paragraphs) json["paragraphs"] = true;
         if (box is { } b) json["box"] = BoxJson(b);
-        Broadcast(Frame("subtitle", json));
+        Broadcast(Frame("subtitle", json), subtitle: true);
+        EventSent?.Invoke(new SubtitleEvent(SubtitleEventKind.Subtitle, text, durationMs, paragraphs));
     }
 
     /// <summary>Dört basamağa yuvarlanır (decimal: JSON'da 0.8 olarak yazılsın).</summary>
@@ -161,7 +179,11 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
     private static decimal Round(double value) =>
         Math.Round((decimal)Math.Clamp(value, 0, 1), 4) / 1.000000000000000000000000000000000m;
 
-    public void Clear() => Broadcast(Frame("clear", new SortedDictionary<string, object>()));
+    public void Clear()
+    {
+        Broadcast(Frame("clear", new SortedDictionary<string, object>()), subtitle: true);
+        EventSent?.Invoke(SubtitleEvent.Cleared);
+    }
 
     /// <summary>
     /// "Ekranı çevir" sonuçları: <c>screen</c> olayı her çeviriyi yazının yeri (<c>box</c>), tipik satır yüksekliği
@@ -180,11 +202,11 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
             if (item.Paragraphs) json["paragraphs"] = true;
             return json;
         }).ToList();
-        Broadcast(Frame("screen", new SortedDictionary<string, object> { ["duration"] = durationMs, ["items"] = list }));
+        Broadcast(Frame("screen", new SortedDictionary<string, object> { ["duration"] = durationMs, ["items"] = list }), subtitle: true);
     }
 
     /// <summary>TV'deki "ekranı çevir" çevirilerini kaldırır (altyazıya dokunmaz).</summary>
-    public void ClearScreen() => Broadcast(Frame("screen-clear", new SortedDictionary<string, object>()));
+    public void ClearScreen() => Broadcast(Frame("screen-clear", new SortedDictionary<string, object>()), subtitle: true);
 
     private static SortedDictionary<string, object> BoxJson(TextBox b) => new()
     {
@@ -220,7 +242,7 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
     public void SendStyle(SubtitleStyle style)
     {
         lock (gate) lastStyle = style;
-        Broadcast(StyleFrame(style));
+        Broadcast(StyleFrame(style), subtitle: true);
     }
 
     // --- Bağlantılar ---
@@ -349,11 +371,15 @@ public sealed class SubtitleServer(int port = 8787, TimeSpan? pingInterval = nul
         ClientsChanged?.Invoke(count);
     }
 
-    /// <summary>Gönderim hatası alan bağlantı kopmuş sayılır ve listeden çıkarılır.</summary>
-    private void Broadcast(string frame)
+    /// <summary>
+    /// Gönderim hatası alan bağlantı kopmuş sayılır ve listeden çıkarılır. <paramref name="subtitle"/>: altyazı olayı;
+    /// altyazı TV'ye gitmiyorsa yalnız izleyiciler (OBS) alır. Dublaj sesi ve ping her zaman herkese gider.
+    /// </summary>
+    private void Broadcast(string frame, bool subtitle = false)
     {
         List<Client> targets;
-        lock (gate) targets = [.. clients];
+        var toTvs = !subtitle || SendsToTv;
+        lock (gate) targets = [.. clients.Where(c => toTvs || c.Viewer)];
         foreach (var client in targets)
             _ = Write(client, frame).ContinueWith(t => Remove(client), TaskContinuationOptions.OnlyOnFaulted);
     }

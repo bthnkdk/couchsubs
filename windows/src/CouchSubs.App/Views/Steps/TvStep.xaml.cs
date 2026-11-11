@@ -75,6 +75,9 @@ public partial class TvStep : UserControl
 
     private async void OnSearch(object sender, RoutedEventArgs e) => await SearchAsync();
 
+    /// <summary>"TV'm yok": TV kurulmaz, altyazı bilgisayar ekranında gösterilir; sonraki adıma geçilir.</summary>
+    private void OnNoTv(object sender, RoutedEventArgs e) => Controller.UseComputerScreen();
+
     private async void OnAndroidTv(object sender, RoutedEventArgs e) => await PairAsync(new LgTv("Android TV", "", TvBrand.AndroidTv));
 
     private void OnGuide(object sender, RoutedEventArgs e) =>

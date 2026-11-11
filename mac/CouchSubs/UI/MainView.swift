@@ -37,14 +37,26 @@ struct MainView: View {
                     .font(.csHeadline)
             }
             .buttonStyle(CSButtonStyle(kind: model.isRunning ? .danger : .primary, fullWidth: true, height: "primaryActionHeight"))
-            .disabled(model.isStarting)
+            .disabled(model.isStarting || (!model.isRunning && !model.canStart))
 
             Card {
                 StatusRow(title: "PS5", value: ps5Status.0, tone: AppModel.ps5Tone(model.sessionState, running: model.isRunning))
-                Divider().overlay(Color.csBorder)
-                StatusRow(title: "TV", value: model.tvClients > 0 ? String(localized: "Connected") : String(localized: "Waiting for the TV app"),
-                          tone: AppModel.tvTone(clients: model.tvClients, running: model.isRunning))
+                // Altyazı yalnız bilgisayar ekranındaysa TV durumu gösterilmez.
+                if model.settings.output.showsOnTV {
+                    Divider().overlay(Color.csBorder)
+                    if model.hasTV {
+                        StatusRow(title: "TV", value: model.tvClients > 0 ? String(localized: "Connected") : String(localized: "Waiting for the TV app"),
+                                  tone: AppModel.tvTone(clients: model.tvClients, running: model.isRunning))
+                    } else {
+                        HStack(spacing: Theme.space("m")) {
+                            StatusRow(title: "TV", value: String(localized: "Not set up"), tone: .idle)
+                            Button("Connect a TV") { model.step = .tv }.buttonStyle(.secondary)
+                        }
+                    }
+                }
             }
+
+            SubtitleOutputCard()
 
             if model.translatorStatus != .ready {
                 Card {

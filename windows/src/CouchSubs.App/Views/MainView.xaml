@@ -34,8 +34,7 @@
             </c:Card>
 
             <!-- Başlat / Durdur -->
-            <Button x:Name="Toggle" HorizontalAlignment="Stretch" MinHeight="{DynamicResource size.primaryActionHeight}" Click="OnToggle"
-                    IsEnabled="{Binding IsStarting, Converter={StaticResource Not}}">
+            <Button x:Name="Toggle" HorizontalAlignment="Stretch" MinHeight="{DynamicResource size.primaryActionHeight}" Click="OnToggle">
                 <StackPanel Orientation="Horizontal">
                     <TextBlock x:Name="ToggleGlyph" Style="{StaticResource GlyphText}" FontSize="16" Margin="0,0,10,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
                     <TextBlock x:Name="ToggleText" FontSize="{DynamicResource headlineFontSize}" FontWeight="SemiBold" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" />
@@ -46,10 +45,18 @@
             <c:Card Margin="0,24,0,0">
                 <StackPanel>
                     <c:StatusRow Title="PS5" Value="{Binding Ps5StatusText}" Tone="{Binding Ps5Tone}" />
-                    <Separator />
-                    <c:StatusRow Title="TV" Value="{Binding TvStatusText}" Tone="{Binding TvTone}" />
+                    <!-- Altyazı yalnız bilgisayar ekranındaysa TV durumu gösterilmez. -->
+                    <StackPanel Visibility="{Binding ShowsOnTv, Converter={StaticResource VisibleIf}}">
+                        <Separator />
+                        <c:StatusRow Title="TV" Value="{Binding TvStatusText}" Tone="{Binding TvTone}" />
+                        <Button Content="{t:T 'Connect a TV'}" HorizontalAlignment="Left" Margin="0,12,0,0" Click="OnConnectTv"
+                                Visibility="{Binding NeedsTv, Converter={StaticResource VisibleIf}}" />
+                    </StackPanel>
                 </StackPanel>
             </c:Card>
+
+            <!-- Altyazının yeri: TV, bilgisayar ekranı ya da ikisi -->
+            <local:SubtitleOutputCard x:Name="OutputCard" Margin="0,16,0,0" />
 
             <!-- PS5 ya da TV uzun süredir bağlanamıyor ve güvenlik duvarında izin yok -->
             <local:FirewallCard Margin="0,16,0,0" />

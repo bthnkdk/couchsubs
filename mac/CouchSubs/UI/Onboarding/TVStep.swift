@@ -44,6 +44,16 @@ struct TVStep: View {
                     }
                     HintText(text: "Vestel, Arçelik, Beko, Grundig, Philips and other TVs running Android TV.")
                 }
+                // TV'si olmayanlar (PS5 monitörde ya da PS Remote Play bilgisayarda): TV kurulumu atlanır.
+                Card {
+                    HStack {
+                        Text("No TV? Show on the computer screen").font(.csBody.weight(.semibold))
+                        Spacer()
+                        Button("Select") { model.useComputerScreen() }
+                            .buttonStyle(.secondary).disabled(working)
+                    }
+                    HintText(text: "Subtitles appear in a window over the game or PS Remote Play. You can connect a TV later.")
+                }
                 if working {
                     HStack(spacing: Theme.space("s")) {
                         ProgressView().controlSize(.small)
