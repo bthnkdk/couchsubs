@@ -263,11 +263,15 @@ extension StreamSession: StreamControlling {}
 extension TVKeeper: KeeperControlling {}
 
 final class LiveServices: AppServices {
-    func discoverConsoles() async -> [ConsoleInfo] { await Console.discover() }
+    func discoverConsoles() async -> [ConsoleInfo] {
+        let found = await Console.discover()
+        let names = found.map { "\($0.name) \($0.host)\($0.isAwake ? "" : " (dinlenmede)")" }
+        RemotePlayLog.write("PS5 araması: \(names.isEmpty ? "bulunamadı" : names.joined(separator: ", "))")
+        return found
+    }
 
     func accountId(fromRedirect url: URL) async throws -> Data {
-        guard let code = PSNAccount.code(fromRedirect: url) else { throw AppError.invalidLogin }
-        return try await PSNAccount.accountId(code: code)
+        try await PSNAccount.accountId(fromRedirect: url)
     }
 
     func register(host: String, accountId: Data, pin: UInt32) async throws -> RegisteredConsole {
@@ -424,6 +428,44 @@ final class LiveServices: AppServices {
 
 enum AppError: LocalizedError, Equatable {
     case invalidPin, invalidLogin, missingAccount, wrongAccount, registrationFailed
+    /// PS5 eşleştirmesinin ayrı ayrı anlatılan sonuçları (Windows'taki AppError ile aynı).
+    case missingConsole, wrongCode, consoleNoAnswer, consoleNoReply, consoleInUse, consoleCrashed, consoleVersion,
+         badAddress, localNetworkBlocked
+    /// PSN girişinin ayrı ayrı anlatılan sonuçları (eskiden hepsi invalidLogin ya da ham Swift hatasıydı).
+    case loginRefused, loginRateLimited, loginServer, loginNetwork, loginBadResponse, loginWindowClosed, loginPageFailed
+
+    /// PSN girişinin hatası ve iletiye eklenecek ayrıntı (Sony'nin hatası, HTTP kodu).
+    static func login(_ error: PSNAccount.PSNError) -> DetailedError {
+        func detail(_ status: Int?, _ text: String?) -> String? {
+            let candidates: [String?] = [status.map { "HTTP \($0)" }, text]
+            let parts = candidates.compactMap { $0 }.filter { !$0.isEmpty }
+            return parts.isEmpty ? nil : parts.joined(separator: ", ")
+        }
+        switch error {
+        case .noCode: return DetailedError(error: .invalidLogin, detail: nil)
+        case .refused(let status, let text): return DetailedError(error: .loginRefused, detail: detail(status, text))
+        case .rateLimited(let status, let text): return DetailedError(error: .loginRateLimited, detail: detail(status, text))
+        case .http(let status, let text): return DetailedError(error: .loginServer, detail: detail(status, text))
+        case .network(let text): return DetailedError(error: .loginNetwork, detail: text)
+        case .badResponse: return DetailedError(error: .loginBadResponse, detail: nil)
+        }
+    }
+
+    init(_ kind: Registration.RegistrationError.Kind) {
+        switch kind {
+        case .wrongAccount: self = .wrongAccount
+        case .wrongCode: self = .wrongCode
+        case .noAnswer: self = .consoleNoAnswer
+        // libchiaki iptali yalnız durdurulunca bildirir; bu da PS5'in yanıtı gelmeden bitmek demektir.
+        case .noReply, .canceled: self = .consoleNoReply
+        case .inUse: self = .consoleInUse
+        case .consoleCrashed: self = .consoleCrashed
+        case .versionMismatch: self = .consoleVersion
+        case .badAddress: self = .badAddress
+        case .localNetworkBlocked: self = .localNetworkBlocked
+        case .failed: self = .registrationFailed
+        }
+    }
 
     var errorDescription: String? {
         switch self {
@@ -432,7 +474,36 @@ enum AppError: LocalizedError, Equatable {
         case .missingAccount: String(localized: "Sign in to PlayStation Network first.")
         case .wrongAccount: String(localized: "The PS5 did not recognise this account. Get the code from the PS5 user signed in with the account you used in CouchSubs, or sign in again with that user's account.")
         case .registrationFailed: String(localized: "The PS5 refused the code. Open Pair Device again on the PS5 and enter the new code.")
+        case .missingConsole: String(localized: "No PS5 found. Make sure it is on and on the same network, or enter its IP address.")
+        case .wrongCode: String(localized: "The code is wrong or has expired. Open Pair Device again on the PS5 and enter the new code.")
+        case .consoleNoAnswer: String(localized: "The PS5 did not answer. Make sure it is on (not in rest mode), on the same network as this computer, and that Remote Play is turned on, then try again.")
+        case .consoleNoReply: String(localized: "The PS5 received the request but did not answer in time. Open Pair Device again on the PS5 and enter the new code.")
+        case .consoleInUse: String(localized: "Remote Play is in use on another device. Close it there and enter a new code.")
+        case .consoleCrashed: String(localized: "The PS5 Remote Play service stopped unexpectedly. Restart the PS5 and enter a new code.")
+        case .consoleVersion: String(localized: "This PS5 system version is not supported yet. Update CouchSubs and try again.")
+        case .badAddress: String(localized: "No PS5 found at this address. Check the PS5's IP address under Settings › Network › Connection Status.")
+        case .localNetworkBlocked: String(localized: "macOS blocked the connection to the local network. Turn on CouchSubs in System Settings › Privacy & Security › Local Network, then enter a new code.")
+        case .loginRefused: String(localized: "Sony did not complete the sign-in. Wait a minute, then press Sign in again and sign in with the second account.")
+        case .loginRateLimited: String(localized: "Sony received too many sign-in attempts. Wait about 15 minutes, then sign in again.")
+        case .loginServer: String(localized: "Sony's sign-in server returned an error. Wait a few minutes, then sign in again.")
+        case .loginNetwork: String(localized: "Could not reach Sony's sign-in server. Check the internet connection, then sign in again.")
+        case .loginBadResponse: String(localized: "Sony's answer could not be read. Sign in again; if it keeps happening, update CouchSubs.")
+        case .loginWindowClosed: String(localized: "The sign-in window was closed before sign-in finished. Press Sign in and finish signing in in the window.")
+        case .loginPageFailed: String(localized: "Sony's sign-in page could not be loaded. Check the internet connection, then sign in again.")
         }
+    }
+}
+
+/// Başarısız PS5 eşleştirmesi ya da PSN girişi: ne yapılacağı, ayrıntı (PS5'in kodu, libchiaki'nin hata satırı, Sony'nin
+/// hatası ya da HTTP kodu) ve gönderilecek günlük dosyası.
+struct DetailedError: LocalizedError, Equatable {
+    let error: AppError
+    let detail: String?
+
+    var errorDescription: String? {
+        var text = error.errorDescription ?? ""
+        if let detail, !detail.isEmpty { text += " (\(detail))" }
+        return text + " " + String(format: String(localized: "If this keeps happening, send us this file: %@"), RemotePlayLog.displayPath)
     }
 }
 
@@ -590,6 +661,11 @@ final class AppModel {
         let poolFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent(AppIdentity.name, isDirectory: true).appendingPathComponent("pool.json")
         let testing = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        // PS5 bağlantı günlüğü (~/Library/Logs/CouchSubs/remoteplay.log); eşleştirme olmazsa kullanıcı bunu gönderir.
+        if !testing {
+            RemotePlayLog.enable()
+            RemotePlayLog.write("CouchSubs \(AppIdentity.version), macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+        }
         pool = LinePool(file: poolFile, app: AppIdentity.version, platform: "mac", enabled: curated.sharePool && !testing)
         // Listede olmayan model varsayılana döndüyse ayar hemen kaydedilir.
         if curated != loaded, let data = try? JSONEncoder().encode(curated) { defaults.set(data, forKey: StoreKey.settings) }
@@ -684,25 +760,47 @@ final class AppModel {
     /// Ayarlardaki "Ücretsiz anahtar al": Gemini seçilir, anahtar alanı görünür (anahtar gelene dek ücretsiz çeviri sürer).
     func chooseFreeGemini() { settings.translationEngine = .gemini }
 
+    /// Giriş penceresinin yönlendirmesinden hesap kimliği. Her hata kendi iletisiyle (`DetailedError`) döner ve
+    /// remoteplay.log'a yazılır; genel "Giriş tamamlanmadı" yalnız son çaredir.
     func completePSNLogin(redirect: URL) async throws {
-        let id = try await services.accountId(fromRedirect: redirect)
+        let id: Data
+        do {
+            id = try await services.accountId(fromRedirect: redirect)
+        } catch let error as PSNAccount.PSNError {
+            RemotePlayLog.write("PSN girişi başarısız: \(error)")
+            throw AppError.login(error)
+        } catch {
+            RemotePlayLog.write("PSN girişi beklenmedik hatayla bitti: \(error)")
+            throw DetailedError(error: .invalidLogin, detail: error.localizedDescription)
+        }
+        RemotePlayLog.write("PSN girişi tamam")
         accountId = id
         store.save(id, for: StoreKey.accountId)
     }
 
+    /// Giriş penceresi yönlendirme olmadan kapandı: kullanıcı kapattı (`problem` nil) ya da Sony'nin sayfası açılamadı.
+    func loginWindowError(problem: String?) -> Error {
+        RemotePlayLog.write("PSN giriş penceresi giriş bitmeden kapandı\(problem.map { ": \($0)" } ?? "")")
+        guard let problem else { return AppError.loginWindowClosed }
+        return DetailedError(error: problem.contains("429") ? .loginRateLimited : .loginPageFailed, detail: problem)
+    }
+
     func discoverConsoles() async -> [ConsoleInfo] { await services.discoverConsoles() }
 
+    /// PS5'e kayıt olur. Her başarısızlık kullanıcıya anlatılır (`AppError` ya da `DetailedError`); sessiz dönüş yok.
     func register(host: String, pin: String) async throws {
-        let digits = pin.filter(\.isNumber)
-        guard digits.count == 8, let value = UInt32(digits) else { throw AppError.invalidPin }
+        let host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { throw AppError.missingConsole }
+        guard let value = Registration.pin(from: pin) else { throw AppError.invalidPin }
         guard let accountId else { throw AppError.missingAccount }
         let registered: RegisteredConsole
         do {
             registered = try await services.register(host: host, accountId: accountId, pin: value)
-        } catch Registration.RegistrationError.wrongAccount {
-            throw AppError.wrongAccount
-        } catch is Registration.RegistrationError {
-            throw AppError.registrationFailed
+        } catch let error as Registration.RegistrationError {
+            throw DetailedError(error: AppError(error.kind), detail: error.detail)
+        } catch {
+            RemotePlayLog.write("PS5 kaydı beklenmedik hatayla bitti (\(host)): \(error)")
+            throw DetailedError(error: .registrationFailed, detail: error.localizedDescription)
         }
         console = registered
         store.save(registered, for: StoreKey.console)

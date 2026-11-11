@@ -2,6 +2,7 @@
 
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace CouchSubs.RemotePlay;
 
@@ -9,6 +10,8 @@ public static class Registration
 {
     /// <summary>libchiaki'nin CHIAKI_RP_APPLICATION_REASON_INVALID_PSN_ID değeri.</summary>
     internal const uint InvalidPsnIdReason = 0x80108b02;
+    /// <summary>CHIAKI_RP_APPLICATION_REASON_REGIST_FAILED: "Regist failed, probably invalid PIN".</summary>
+    private const uint RegistFailedReason = 0x80108b09;
     private const uint InUseReason = 0x80108b10;
     private const uint VersionReason = 0x80108b11;
     private const uint CrashReason = 0x80108b15;
@@ -27,20 +30,42 @@ public static class Registration
                                      TaskCreationOptions.LongRunning, TaskScheduler.Default).WaitAsync(ct);
     }
 
-    /// <summary>PS5'in bildirdiği nedenden kullanıcıya anlatılacak hata.</summary>
-    /// <param name="errors">Kayıt sırasında libchiaki'nin yazdığı hata satırları.</param>
+    /// <summary>PS5'in gösterdiği 8 haneli kodu okur. Boşluk, tire ve nokta atlanır; başka bir karakter ya da 8'den
+    /// farklı hane sayısı null. Başka yazı sistemlerinin onluk rakamları da kabul edilir (Mac'teki Registration.pin).</summary>
+    public static uint? ParsePin(string? text)
+    {
+        if (text is null) return null;
+        var digits = new StringBuilder(8);
+        foreach (var rune in text.EnumerateRunes())
+        {
+            if (Rune.IsWhiteSpace(rune) || (rune.IsBmp && "-–._".Contains((char)rune.Value))) continue;
+            if (Rune.GetUnicodeCategory(rune) != System.Globalization.UnicodeCategory.DecimalDigitNumber) return null;
+            digits.Append((char)('0' + (int)Rune.GetNumericValue(rune)));
+        }
+        return digits.Length == 8 && uint.TryParse(digits.ToString(), System.Globalization.NumberStyles.None,
+                                                   System.Globalization.CultureInfo.InvariantCulture, out var value) ? value : null;
+    }
+
+    /// <summary>PS5'in bildirdiği nedenden ya da libchiaki'nin hata satırlarından kullanıcıya anlatılacak hata.</summary>
+    /// <param name="errors">Kayıt sırasında libchiaki'nin yazdığı hata satırları (regist.c).</param>
     internal static RegistrationFailure FailureFrom(uint? reason, IReadOnlyList<string>? errors = null) => reason switch
     {
         InvalidPsnIdReason => RegistrationFailure.WrongAccount,
+        RegistFailedReason => RegistrationFailure.WrongCode,
         InUseReason => RegistrationFailure.InUse,
         VersionReason => RegistrationFailure.VersionMismatch,
         CrashReason => RegistrationFailure.ConsoleCrashed,
-        null when errors?.Any(IsSearchFailure) == true => RegistrationFailure.NoAnswer,
+        null when Any(errors, "getaddrinfo") => RegistrationFailure.BadAddress,
+        // Eskiden yalnız "search response" ve "connect for search" sayılıyordu; aramanın gönderilemediği
+        // ("failed to send search") ve isteğin bağlanamadığı durumlar genel "kodu kabul etmedi"ye düşüyordu.
+        null when Any(errors, "search response", "connect for search", "send search", "Regist search failed",
+                      "connect for request", "Regist connect failed") => RegistrationFailure.NoAnswer,
+        null when Any(errors, "response HTTP header", "receiving response content", "receive response content") => RegistrationFailure.NoReply,
         _ => RegistrationFailure.Failed,
     };
 
-    private static bool IsSearchFailure(string line) =>
-        line.Contains("search response", StringComparison.Ordinal) || line.Contains("connect for search", StringComparison.Ordinal);
+    private static bool Any(IReadOnlyList<string>? errors, params string[] needles) =>
+        errors?.Any(line => needles.Any(needle => line.Contains(needle, StringComparison.Ordinal))) == true;
 
     /// <summary>Hata iletisine eklenen ayrıntı: PS5'in kodu, o yoksa libchiaki'nin ilk (en belirleyici) hata satırı.</summary>
     internal static string? DetailFrom(IReadOnlyList<string> errors)
@@ -53,6 +78,7 @@ public static class Registration
     private static unsafe RegisteredConsole Register(string host, byte[] accountId, uint pin)
     {
         NativeMethods.EnsureInitialized();
+        RemotePlayLog.Note($"PS5 kaydı başlıyor: {host}, hesap kimliği {Convert.ToBase64String(accountId)}");
         for (var attempt = 1; ; attempt++)
         {
             var errors = new List<string>();
@@ -72,16 +98,30 @@ public static class Registration
             }
 
             if (result == 0)
-                return new RegisteredConsole(host, NativeMethods.FixedString(output.Nickname, 0x20),
-                                             new ReadOnlySpan<byte>(output.RegistKey, 0x10).ToArray(),
-                                             new ReadOnlySpan<byte>(output.Morning, 0x10).ToArray());
-            if (result == 2) throw new RegistrationException(RegistrationFailure.Canceled);
+            {
+                var registered = new RegisteredConsole(host, NativeMethods.FixedString(output.Nickname, 0x20),
+                                                       new ReadOnlySpan<byte>(output.RegistKey, 0x10).ToArray(),
+                                                       new ReadOnlySpan<byte>(output.Morning, 0x10).ToArray());
+                RemotePlayLog.Note($"PS5 kaydı tamam ({host}): {registered.Name}");
+                return registered;
+            }
 
             IReadOnlyList<string> lines;
             lock (errors) lines = [.. errors];
             uint? reported = result == 1 && reason != 0 ? reason : null;
-            var failure = result == 1 ? FailureFrom(reported, lines) : RegistrationFailure.Failed;
-            var detail = DetailFrom(lines) ?? (result == 1 ? null : $"native error {result}");
+            // 2: libchiaki iptali yalnız cs_register'ın 30 sn'lik süresi dolunca durdurmasıyla olur; PS5 yanıt vermemiştir.
+            var failure = result switch
+            {
+                1 => FailureFrom(reported, lines),
+                2 => RegistrationFailure.NoReply,
+                _ => RegistrationFailure.Failed,
+            };
+            var detail = DetailFrom(lines) ?? result switch
+            {
+                1 => null,
+                2 => "no answer within 30 s",
+                _ => $"native error {result}",
+            };
             RemotePlayLog.Write(0, $"PS5 kaydı başarısız ({host}, deneme {attempt}): {failure} {detail}");
             if (failure != RegistrationFailure.NoAnswer || attempt >= SearchAttempts)
                 throw new RegistrationException(failure, reported, detail);

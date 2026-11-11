@@ -3,11 +3,11 @@
 import CChiaki
 import Foundation
 
-/// libchiaki'nin günlüğünü uygulamanın günlüğüne yönlendirir (hata ve uyarılar).
+/// libchiaki'nin günlüğünü uygulamanın günlüğüne ve remoteplay.log dosyasına yönlendirir (hata, uyarı, bilgi).
 final class ChiakiLogger {
     let pointer: UnsafeMutablePointer<ChiakiLog>
-    /// Her satır için çağrılır (libchiaki'nin iş parçacığında).
-    var onMessage: ((String) -> Void)?
+    /// Her satır için çağrılır (libchiaki'nin iş parçacığında); `isError` hata düzeyindeki satırlarda doğrudur.
+    var onMessage: ((_ text: String, _ isError: Bool) -> Void)?
 
     init() {
         pointer = .allocate(capacity: 1)
@@ -15,8 +15,11 @@ final class ChiakiLogger {
         chiaki_log_init(pointer, mask, { level, message, user in
             guard let message else { return }
             let text = String(cString: message)
+            let isError = level == CHIAKI_LOG_ERROR
+            let name = isError ? "error" : level == CHIAKI_LOG_WARNING ? "warning" : "info"
             print("[chiaki] \(text)")
-            if let user { Unmanaged<ChiakiLogger>.fromOpaque(user).takeUnretainedValue().onMessage?(text) }
+            RemotePlayLog.write("[chiaki \(name)] \(text)")
+            if let user { Unmanaged<ChiakiLogger>.fromOpaque(user).takeUnretainedValue().onMessage?(text, isError) }
         }, nil)
         // Günlük yapısı bu nesneyle birlikte yaşar; geri çağrıya sahibini sahiplenmeden ver.
         pointer.pointee.user = Unmanaged.passUnretained(self).toOpaque()

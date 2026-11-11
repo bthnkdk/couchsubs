@@ -12,19 +12,34 @@ namespace CouchSubs.App.Views;
 public partial class PsnLoginWindow : Window
 {
     private Uri? redirect;
+    /// <summary>Pencerenin gördüğü son sorun (sayfa açılamadı, Sony'nin HTTP hatası, WebView2 çöktü); kapanınca bildirilir.</summary>
+    private string? problem;
 
     private PsnLoginWindow()
     {
         InitializeComponent();
-        Loaded += async (_, _) => await OpenAsync();
+        Loaded += async (_, _) =>
+        {
+            try
+            {
+                await OpenAsync();
+            }
+            catch (Exception error)
+            {
+                // WebView2 başlatılamadı: eskiden işlenmeyen istisna olurdu.
+                problem = $"WebView2: {error.Message}";
+                Close();
+            }
+        };
     }
 
-    /// <summary>Giriş tamamlanırsa yönlendirme adresini, vazgeçilirse null döner.</summary>
-    public static Uri? Show(Window? owner)
+    /// <summary>Giriş tamamlanırsa yönlendirme adresini döner; tamamlanmadan kapanırsa adres null, <c>Problem</c> pencerenin
+    /// gördüğü sorun (kullanıcı kendisi kapattıysa null).</summary>
+    public static (Uri? Redirect, string? Problem) Show(Window? owner)
     {
         var window = new PsnLoginWindow { Owner = owner };
         window.ShowDialog();
-        return window.redirect;
+        return (window.redirect, window.redirect is null ? window.problem : null);
     }
 
     /// <summary>Microsoft'un WebView2 indirme sayfası (Evergreen kurulumu).</summary>
@@ -53,6 +68,12 @@ public partial class PsnLoginWindow : Window
         environment.BrowserProcessExited += (_, _) => TryDelete(folder);
         await Browser.EnsureCoreWebView2Async(environment);
         Browser.CoreWebView2.NavigationStarting += OnNavigation;
+        Browser.CoreWebView2.NavigationCompleted += OnNavigationCompleted;
+        Browser.CoreWebView2.ProcessFailed += (_, e) =>
+        {
+            problem = $"WebView2 {e.ProcessFailedKind}";
+            RemotePlayLog.Note($"PSN giriş penceresi: {problem}");
+        };
         Browser.CoreWebView2.Navigate(PsnAccount.AuthorizeUrl.AbsoluteUri);
         Closed += (_, _) => Browser.Dispose();
     }
@@ -75,6 +96,21 @@ public partial class PsnLoginWindow : Window
         e.Cancel = true;
         redirect = new Uri(e.Uri);
         Close();
+    }
+
+    /// <summary>Sony'nin sayfası açılamadıysa ya da hata kodu döndürdüyse (ör. 429 çok fazla deneme) not edilir; giriş
+    /// bitmeden pencere kapanınca kullanıcıya bu söylenir. Başarılı sayfa önceki sorunu siler.</summary>
+    private void OnNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+    {
+        // Yönlendirmeyi kendimiz iptal ediyoruz; o bir sorun değildir.
+        if (redirect is not null) return;
+        if (!e.IsSuccess && e.WebErrorStatus != CoreWebView2WebErrorStatus.OperationCanceled)
+            problem = e.HttpStatusCode >= 400 ? $"HTTP {e.HttpStatusCode}" : e.WebErrorStatus.ToString();
+        else if (e.IsSuccess && e.HttpStatusCode >= 400)
+            problem = $"HTTP {e.HttpStatusCode}";
+        else if (e.IsSuccess)
+            problem = null;
+        if (problem is not null) RemotePlayLog.Note($"PSN giriş sayfası: {problem}");
     }
 
     private void OnCancel(object sender, RoutedEventArgs e) => Close();

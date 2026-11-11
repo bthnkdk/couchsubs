@@ -31,8 +31,48 @@ public struct RegisteredConsole: Codable, Equatable, Sendable {
 }
 
 public enum Registration {
-    /// PS5'in "Cihazı Bağla" ekranındaki 8 haneli kodla kayıt olur.
+    /// Kod PS5'e gitmeden biten aşama (arama tek UDP paketiyle yapılır); paket kaybında yeniden denemek güvenlidir.
+    static let searchAttempts = 3
+
+    /// PS5'in "Cihazı Bağla" ekranındaki 8 haneli kodla kayıt olur. Başarısızlıkta `RegistrationError`; her deneme
+    /// ve sonucu remoteplay.log'a yazılır.
     public static func register(host: String, accountId: Data, pin: UInt32) async throws -> RegisteredConsole {
+        RemotePlayLog.write("PS5 kaydı başlıyor: \(host), hesap kimliği \(accountId.base64EncodedString())")
+        guard accountId.count == 8 else {
+            let error = RegistrationError(.failed, detail: "PSN account id must be 8 bytes (\(accountId.count))")
+            RemotePlayLog.write("PS5 kaydı başarısız (\(host)): \(error)")
+            throw error
+        }
+        var attempt = 1
+        while true {
+            do {
+                let console = try await registerOnce(host: host, accountId: accountId, pin: pin)
+                RemotePlayLog.write("PS5 kaydı tamam (\(host)): \(console.name)")
+                return console.withHost(host)
+            } catch let error as RegistrationError {
+                RemotePlayLog.write("PS5 kaydı başarısız (\(host), deneme \(attempt)): \(error)")
+                guard error.kind == .noAnswer, attempt < searchAttempts else { throw error }
+            }
+            attempt += 1
+            try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+
+    /// PS5'in gösterdiği 8 haneli kodu okur. Boşluk, tire ve nokta atlanır; başka bir karakter ya da 8'den farklı
+    /// hane sayısı nil. Başka yazı sistemlerinin onluk rakamları da kabul edilir.
+    public static func pin(from text: String) -> UInt32? {
+        var digits = ""
+        for character in text {
+            if character.isWhitespace || "-–._".contains(character) { continue }
+            guard let scalar = character.unicodeScalars.first, character.unicodeScalars.count == 1,
+                  scalar.properties.numericType == .decimal, let value = character.wholeNumberValue else { return nil }
+            digits += String(value)
+        }
+        guard digits.count == 8 else { return nil }
+        return UInt32(digits)
+    }
+
+    private static func registerOnce(host: String, accountId: Data, pin: UInt32) async throws -> RegisteredConsole {
         let logger = ChiakiLogger()
         let regist = UnsafeMutablePointer<ChiakiRegist>.allocate(capacity: 1)
         let box = Box()
@@ -48,11 +88,12 @@ public enum Registration {
         }
 
         // PS5'in red nedeni olaya değil yalnız günlüğe yazılır; olaydan önce aynı iş parçacığında gelir.
-        logger.onMessage = { line in
+        logger.onMessage = { line, isError in
             if let reason = reason(fromLog: line) { box.reason = reason }
+            if isError { box.errors.append(line) }
         }
 
-        let console: RegisteredConsole = try await withCheckedThrowingContinuation { continuation in
+        return try await withCheckedThrowingContinuation { continuation in
             box.continuation = continuation
             host.withCString { hostPointer in
                 var info = ChiakiRegistInfo()
@@ -68,51 +109,130 @@ public enum Registration {
 
                 let user = Unmanaged.passRetained(box).toOpaque()
                 let error = chiaki_regist_start(regist, logger.pointer, &info, { event, user in
-                    guard let event, let user else { return }
-                    Unmanaged<Box>.fromOpaque(user).takeRetainedValue().finish(event.pointee)
+                    guard let user else { return }
+                    let box = Unmanaged<Box>.fromOpaque(user).takeRetainedValue()
+                    guard let event else {
+                        return box.resume(.failure(RegistrationError(.failed, detail: "empty regist event")))
+                    }
+                    box.finish(event.pointee)
                 }, user)
                 if error.isSuccess {
                     started = true
                 } else {
                     Unmanaged<Box>.fromOpaque(user).release()
-                    box.resume(.failure(ChiakiError(code: error)))
+                    box.resume(.failure(RegistrationError(.failed, detail: "regist start: \(ChiakiError(code: error))")))
                 }
             }
         }
-        return console.withHost(host)
     }
 
-    public enum RegistrationError: Error, Equatable {
-        case failed, canceled
-        /// PS5 hesabı tanımadı: kod, uygulamada giriş yapılan hesabın PS5 kullanıcısından alınmamış.
-        case wrongAccount
-
-        init(reason: UInt32?) {
-            self = reason == UInt32(CHIAKI_RP_APPLICATION_REASON_INVALID_PSN_ID) ? .wrongAccount : .failed
+    /// Eşleştirme hatası: ne olduğu (`kind`), PS5'in bildirdiği kod ve iletiye/günlüğe eklenen teknik ayrıntı.
+    public struct RegistrationError: Error, Equatable, CustomStringConvertible {
+        public enum Kind: String, Sendable {
+            /// Sınıflanamayan hata (ayrıntıda libchiaki'nin satırı).
+            case failed
+            case canceled
+            /// PS5 hesabı tanımadı: kod, uygulamada giriş yapılan hesabın PS5 kullanıcısından alınmamış.
+            case wrongAccount
+            /// PS5 kodu kabul etmedi: kod yanlış ya da süresi dolmuş.
+            case wrongCode
+            /// PS5 arama paketine yanıt vermedi: kod PS5'e hiç ulaşmadı (kapalı, dinlenme modunda, başka ağda).
+            case noAnswer
+            /// PS5 isteği aldı ama yanıtı zamanında gelmedi.
+            case noReply
+            case inUse
+            case consoleCrashed
+            case versionMismatch
+            /// Girilen adres çözülemedi (yanlış yazılmış IP).
+            case badAddress
+            /// macOS yerel ağ izni kapalı: paket ağa hiç çıkamadı.
+            case localNetworkBlocked
         }
+
+        public let kind: Kind
+        /// PS5'in bildirdiği RP-Application-Reason (ör. 0x80108b09); PS5 yanıt vermediyse nil.
+        public let reason: UInt32?
+        public let detail: String?
+
+        public init(_ kind: Kind, reason: UInt32? = nil, detail: String? = nil) {
+            self.kind = kind
+            self.reason = reason
+            self.detail = detail
+        }
+
+        public var description: String { detail.map { "\(kind.rawValue): \($0)" } ?? kind.rawValue }
+    }
+
+    static let reasonPrefix = "Reported Application Reason: "
+
+    /// PS5'in kodundan ve libchiaki'nin hata satırlarından hatanın türü.
+    static func kind(reason: UInt32?, errors: [String]) -> RegistrationError.Kind {
+        if let reason {
+            switch reason {
+            case UInt32(CHIAKI_RP_APPLICATION_REASON_INVALID_PSN_ID): return .wrongAccount
+            case UInt32(CHIAKI_RP_APPLICATION_REASON_REGIST_FAILED): return .wrongCode
+            case UInt32(CHIAKI_RP_APPLICATION_REASON_IN_USE): return .inUse
+            case UInt32(CHIAKI_RP_APPLICATION_REASON_RP_VERSION): return .versionMismatch
+            case UInt32(CHIAKI_RP_APPLICATION_REASON_CRASH): return .consoleCrashed
+            default: return .failed
+            }
+        }
+        func any(_ needles: [String]) -> Bool { errors.contains { line in needles.contains { line.contains($0) } } }
+        if any(["getaddrinfo"]) { return .badAddress }
+        // macOS yerel ağ izni yoksa paket gönderilemez: "No route to host" ya da "Operation not permitted".
+        if any(["send search", "for search", "Regist connect failed"]) && any(["No route to host", "not permitted"]) {
+            return .localNetworkBlocked
+        }
+        if any(["search response", "connect for search", "failed to send search", "Regist search failed",
+                "connect for request", "Regist connect failed"]) { return .noAnswer }
+        if any(["response HTTP header", "receiving response content", "receive response content"]) { return .noReply }
+        return .failed
+    }
+
+    /// İletiye eklenen ayrıntı: PS5'in kodu, o yoksa libchiaki'nin ilk (en belirleyici) hata satırı.
+    static func detail(from errors: [String]) -> String? {
+        if let reported = errors.first(where: { $0.contains(reasonPrefix) }), let range = reported.range(of: reasonPrefix) {
+            return String(reported[range.upperBound...])
+        }
+        return errors.first
     }
 
     /// "Reported Application Reason: 0x80108b02 (...)" satırından nedeni okur.
     static func reason(fromLog line: String) -> UInt32? {
-        let prefix = "Reported Application Reason: 0x"
-        guard let range = line.range(of: prefix) else { return nil }
+        guard let range = line.range(of: reasonPrefix + "0x") else { return nil }
         return UInt32(line[range.upperBound...].prefix { $0.isHexDigit }, radix: 16)
+    }
+
+    /// libchiaki'nin bitiş olayından sonuç (testlerde olay elle kurulur).
+    static func result(type: ChiakiRegistEventType, host: ChiakiRegisteredHost?, reason: UInt32?,
+                       errors: [String]) -> Result<RegisteredConsole, RegistrationError> {
+        switch type {
+        case CHIAKI_REGIST_EVENT_TYPE_FINISHED_SUCCESS:
+            guard let host else { return .failure(RegistrationError(.failed, detail: "success without host")) }
+            let console = RegisteredConsole(host: "", name: string(of: host.server_nickname),
+                                            registKey: data(of: host.rp_regist_key), morning: data(of: host.rp_key))
+            // Anahtarsız kayıt sonra bağlanamaz; başarı sayılmaz.
+            guard console.registKey.contains(where: { $0 != 0 }), console.morning.contains(where: { $0 != 0 }) else {
+                return .failure(RegistrationError(.failed, detail: "empty registration key"))
+            }
+            return .success(console)
+        case CHIAKI_REGIST_EVENT_TYPE_FINISHED_CANCELED:
+            return .failure(RegistrationError(.canceled, detail: detail(from: errors)))
+        default:
+            return .failure(RegistrationError(kind(reason: reason, errors: errors), reason: reason, detail: detail(from: errors)))
+        }
     }
 
     private final class Box {
         var continuation: CheckedContinuation<RegisteredConsole, Error>?
         var reason: UInt32?
+        var errors: [String] = []
 
         func finish(_ event: ChiakiRegistEvent) {
-            switch event.type {
-            case CHIAKI_REGIST_EVENT_TYPE_FINISHED_SUCCESS:
-                guard let host = event.registered_host?.pointee else { return resume(.failure(RegistrationError.failed)) }
-                resume(.success(RegisteredConsole(host: "", name: string(of: host.server_nickname),
-                                                  registKey: data(of: host.rp_regist_key), morning: data(of: host.rp_key))))
-            case CHIAKI_REGIST_EVENT_TYPE_FINISHED_CANCELED:
-                resume(.failure(RegistrationError.canceled))
-            default:
-                resume(.failure(RegistrationError(reason: reason)))
+            let host = event.type == CHIAKI_REGIST_EVENT_TYPE_FINISHED_SUCCESS ? event.registered_host?.pointee : nil
+            switch Registration.result(type: event.type, host: host, reason: reason, errors: errors) {
+            case .success(let console): resume(.success(console))
+            case .failure(let error): resume(.failure(error))
             }
         }
 

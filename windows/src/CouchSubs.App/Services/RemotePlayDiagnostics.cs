@@ -16,8 +16,7 @@ internal static class RemotePlayDiagnostics
     private const long MaxBytes = 1 << 20;
     private static readonly BlockingCollection<string> Lines = new(boundedCapacity: 2000);
 
-    internal static string LogPath =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CouchSubs", "remoteplay.log");
+    internal static string LogPath => RemotePlayLog.FilePath;
 
     public static void Start()
     {

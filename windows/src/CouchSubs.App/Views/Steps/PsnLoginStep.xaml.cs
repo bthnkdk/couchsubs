@@ -29,22 +29,33 @@ public partial class PsnLoginStep : UserControl
         // Giriş penceresi WebView2 ile açılır; kurulum normalde onu da kurar, yine de eksikse çökmek yerine yol gösterilir.
         if (!PsnLoginWindow.IsBrowserAvailable())
         {
+            CouchSubs.RemotePlay.RemotePlayLog.Note("PSN girişi: WebView2 kurulu değil");
             Error.Text = Localizer.Current["The sign-in window needs Microsoft's WebView2 component, which is missing on this computer. Install it from the page that just opened, then press Sign in again."];
             try { Process.Start(new ProcessStartInfo(PsnLoginWindow.BrowserDownloadUrl) { UseShellExecute = true }); }
             catch (Exception) { }
             return;
         }
-        var redirect = PsnLoginWindow.Show(Window.GetWindow(this));
-        if (redirect is null) return;
+        var (redirect, problem) = PsnLoginWindow.Show(Window.GetWindow(this));
+        if (redirect is null)
+        {
+            // Pencere giriş bitmeden kapandı: eskiden sessizce dönülüyordu.
+            Error.Text = Controller.LoginWindowError(problem).Message;
+            return;
+        }
         SignIn.IsEnabled = false;
         Error.Text = "";
         try
         {
             await Controller.CompletePsnLoginAsync(redirect);
         }
+        catch (AppException error)
+        {
+            Error.Text = error.Message;
+        }
         catch (Exception error)
         {
-            Error.Text = error is AppException ? error.Message : AppException.Describe(AppError.InvalidLogin, Localizer.Current);
+            // Son çare: denetleyici her hatayı AppException'a çevirir; buraya düşen yine de ayrıntısıyla gösterilir.
+            Error.Text = $"{AppException.Describe(AppError.InvalidLogin, Localizer.Current)} ({error.Message})";
         }
         SignIn.IsEnabled = true;
         Refresh();

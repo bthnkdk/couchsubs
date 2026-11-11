@@ -95,20 +95,51 @@ public class RegistrationReasonTests
     public void InvalidPsnIdMeansWrongAccount()
     {
         Assert.Equal(RegistrationFailure.WrongAccount, Registration.FailureFrom(0x80108b02));
-        Assert.Equal(RegistrationFailure.Failed, Registration.FailureFrom(0x80108b09));
+        Assert.Equal(RegistrationFailure.Failed, Registration.FailureFrom(0x80108bff));
         Assert.Equal(RegistrationFailure.Failed, Registration.FailureFrom(null));
     }
 
     [Fact]
     public void KnownReasonsAndMissingSearchAnswerAreDistinguished()
     {
+        Assert.Equal(RegistrationFailure.WrongCode, Registration.FailureFrom(0x80108b09));
         Assert.Equal(RegistrationFailure.InUse, Registration.FailureFrom(0x80108b10));
         Assert.Equal(RegistrationFailure.VersionMismatch, Registration.FailureFrom(0x80108b11));
         Assert.Equal(RegistrationFailure.ConsoleCrashed, Registration.FailureFrom(0x80108b15));
         Assert.Equal(RegistrationFailure.NoAnswer, Registration.FailureFrom(null, ["Regist timed out waiting for search response", "Regist search failed"]));
         // PS5 kod bildirdiyse arama aşaması geçilmiştir.
-        Assert.Equal(RegistrationFailure.Failed, Registration.FailureFrom(0x80108b09, ["Regist timed out waiting for search response"]));
+        Assert.Equal(RegistrationFailure.WrongCode, Registration.FailureFrom(0x80108b09, ["Regist timed out waiting for search response"]));
     }
+
+    /// PS5 kod bildirmediyse libchiaki'nin hata satırlarından nerede kalındığı anlaşılır (satırlar regist.c'den).
+    [Theory]
+    [InlineData(RegistrationFailure.NoAnswer, "Regist failed to send search: Unknown error", "Regist search failed")]
+    [InlineData(RegistrationFailure.NoAnswer, "Regist connect failed: 10060", "Regist eventually failed to connect for request")]
+    [InlineData(RegistrationFailure.NoAnswer, "Regist eventually failed to connect for search", "Regist search failed")]
+    [InlineData(RegistrationFailure.BadAddress, "Regist failed to getaddrinfo on 192.168.1.", "Regist eventually failed")]
+    [InlineData(RegistrationFailure.NoReply, "Regist failed to receive response HTTP header", "Regist eventually failed")]
+    [InlineData(RegistrationFailure.NoReply, "Regist timed out receiving response content", "Regist eventually failed")]
+    [InlineData(RegistrationFailure.Failed, "Regist response is missing RegistKey (or it was invalid)", "Regist eventually failed")]
+    public void ChiakiErrorLinesAreClassified(RegistrationFailure expected, string first, string second) =>
+        Assert.Equal(expected, Registration.FailureFrom(null, [first, second]));
+
+    [Theory]
+    [InlineData("12345678", 12345678u)]
+    [InlineData("1234 5678", 12345678u)]
+    [InlineData(" 1234-5678\n", 12345678u)]
+    [InlineData("01234567", 1234567u)]
+    [InlineData("１２３４５６７８", 12345678u)]
+    [InlineData("١٢٣٤٥٦٧٨", 12345678u)]
+    public void PinIsRead(string text, uint expected) => Assert.Equal(expected, Registration.ParsePin(text));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("1234567")]
+    [InlineData("123456789")]
+    [InlineData("1234567O")]
+    [InlineData("1234567½")]
+    public void InvalidPinIsRejected(string? text) => Assert.Null(Registration.ParsePin(text));
 
     [Fact]
     public void DetailPrefersThePs5Reason()

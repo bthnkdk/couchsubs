@@ -42,8 +42,14 @@ final class FakeServices: AppServices {
     }
 
     func discoverConsoles() async -> [ConsoleInfo] { consoles }
-    func accountId(fromRedirect url: URL) async throws -> Data { Data(repeating: 1, count: 8) }
+    var loginError: Error?
+    func accountId(fromRedirect url: URL) async throws -> Data {
+        if let loginError { throw loginError }
+        return Data(repeating: 1, count: 8)
+    }
+    var registeredPin: UInt32?
     func register(host: String, accountId: Data, pin: UInt32) async throws -> RegisteredConsole {
+        registeredPin = pin
         if let registerError { throw registerError }
         let console = RegisteredConsole(host: host, name: "PS5-789", registKey: Data(repeating: 0x31, count: 16), morning: Data(repeating: 2, count: 16))
         registered = console
@@ -170,39 +176,130 @@ final class AppModelTests: XCTestCase {
 
     /// PS5 hesabı tanımazsa kullanıcıya kodu hangi kullanıcıdan alacağı söylenmeli.
     func testWrongAccountRegistrationExplainsWhatToDo() async {
-        let services = FakeServices()
-        services.registerError = Registration.RegistrationError.wrongAccount
-        let model = AppModel(services: services, store: MemoryStore(), defaults: .isolated())
-        model.accountId = Data(repeating: 1, count: 8)
-        do {
-            try await model.register(host: "192.168.1.253", pin: "12345678")
-            XCTFail("Kayıt başarısız olmalı")
-        } catch {
-            XCTAssertEqual(error as? AppError, .wrongAccount)
-        }
+        let error = await registrationError(Registration.RegistrationError(.wrongAccount, reason: 0x80108b02))
+        XCTAssertEqual((error as? DetailedError)?.error, .wrongAccount)
     }
 
     func testOtherRegistrationFailureSuggestsNewCode() async {
-        let services = FakeServices()
-        services.registerError = Registration.RegistrationError.failed
-        let model = AppModel(services: services, store: MemoryStore(), defaults: .isolated())
-        model.accountId = Data(repeating: 1, count: 8)
-        do {
-            try await model.register(host: "192.168.1.253", pin: "12345678")
-            XCTFail("Kayıt başarısız olmalı")
-        } catch {
-            XCTAssertEqual(error as? AppError, .registrationFailed)
+        let error = await registrationError(Registration.RegistrationError(.failed))
+        XCTAssertEqual((error as? DetailedError)?.error, .registrationFailed)
+    }
+
+    /// Her eşleştirme sonucu kendi iletisini alır; hiçbiri sessiz kalmaz ve genel "kodu kabul etmedi"ye düşmez.
+    func testEveryRegistrationFailureHasItsOwnMessage() async {
+        let cases: [(Registration.RegistrationError.Kind, AppError)] = [
+            (.wrongCode, .wrongCode), (.noAnswer, .consoleNoAnswer), (.noReply, .consoleNoReply), (.canceled, .consoleNoReply),
+            (.inUse, .consoleInUse), (.consoleCrashed, .consoleCrashed), (.versionMismatch, .consoleVersion),
+            (.badAddress, .badAddress), (.localNetworkBlocked, .localNetworkBlocked),
+        ]
+        for (kind, expected) in cases {
+            let error = await registrationError(Registration.RegistrationError(kind))
+            XCTAssertEqual((error as? DetailedError)?.error, expected, "\(kind)")
+            XCTAssertFalse(error?.localizedDescription.isEmpty ?? true)
         }
+    }
+
+    /// İletide PS5'in kodu ve gönderilecek günlük dosyası yazar.
+    func testRegistrationErrorShowsThePs5CodeAndLogFile() async {
+        let error = await registrationError(Registration.RegistrationError(.wrongCode, reason: 0x80108b09,
+                                                                            detail: "0x80108b09 (Regist failed, probably invalid PIN)"))
+        let text = error?.localizedDescription ?? ""
+        XCTAssertTrue(text.contains("0x80108b09"))
+        XCTAssertTrue(text.contains(RemotePlayLog.displayPath))
+    }
+
+    /// libchiaki dışı bir hata da (ör. kayıt başlatılamadı) iletiye dönüşür.
+    func testUnexpectedRegistrationErrorIsStillExplained() async {
+        struct Boom: Error {}
+        let error = await registrationError(Boom())
+        XCTAssertEqual((error as? DetailedError)?.error, .registrationFailed)
     }
 
     func testPinMustBeEightDigits() async {
         let model = AppModel(services: FakeServices(), store: MemoryStore(), defaults: .isolated())
         model.accountId = Data(repeating: 1, count: 8)
+        for pin in ["1234", "", "123456789", "1234567a"] {
+            do {
+                try await model.register(host: "192.168.1.253", pin: pin)
+                XCTFail("Geçersiz kod kabul edilmemeli: \(pin)")
+            } catch {
+                XCTAssertEqual(error as? AppError, .invalidPin)
+                XCTAssertNil(model.console)
+            }
+        }
+    }
+
+    /// PS5'in ekranındaki gibi boşluklu ya da tireli yazılan kod da kabul edilir.
+    func testPinWithSpacesIsAccepted() async throws {
+        let services = FakeServices()
+        let model = AppModel(services: services, store: MemoryStore(), defaults: .isolated())
+        model.accountId = Data(repeating: 1, count: 8)
+        try await model.register(host: " 192.168.1.253 ", pin: " 1234 5678 ")
+        XCTAssertEqual(services.registered?.host, "192.168.1.253")
+        XCTAssertEqual(services.registeredPin, 12345678)
+    }
+
+    /// PSN girişinin her hatası kendi iletisini alır (eskiden ham Swift hatası ya da "Giriş tamamlanmadı" idi);
+    /// Sony'nin hatası ve HTTP kodu iletide yazar, hesap kaydedilmez.
+    func testEveryLoginFailureHasItsOwnMessage() async {
+        let cases: [(PSNAccount.PSNError, AppError, String?)] = [
+            (.refused(status: 400, detail: "invalid_grant: Invalid authorization code"), .loginRefused, "HTTP 400, invalid_grant"),
+            (.rateLimited(status: 429, detail: nil), .loginRateLimited, "HTTP 429"),
+            (.http(503, detail: nil), .loginServer, "HTTP 503"),
+            (.network("The Internet connection appears to be offline."), .loginNetwork, "offline"),
+            (.badResponse, .loginBadResponse, nil),
+            (.noCode, .invalidLogin, nil),
+        ]
+        for (thrown, expected, detail) in cases {
+            let services = FakeServices()
+            services.loginError = thrown
+            let model = AppModel(services: services, store: MemoryStore(), defaults: .isolated())
+            do {
+                try await model.completePSNLogin(redirect: URL(string: "https://remoteplay.dl.playstation.net/remoteplay/redirect?code=x")!)
+                XCTFail("Giriş başarısız olmalı: \(thrown)")
+            } catch {
+                XCTAssertEqual((error as? DetailedError)?.error, expected, "\(thrown)")
+                if let detail { XCTAssertTrue(error.localizedDescription.contains(detail), error.localizedDescription) }
+                XCTAssertTrue(error.localizedDescription.contains(RemotePlayLog.displayPath))
+                XCTAssertNil(model.accountId)
+            }
+        }
+    }
+
+    /// Giriş penceresi yönlendirmesiz kapanırsa sessiz kalınmaz; sayfanın sorunu varsa o söylenir.
+    func testClosedLoginWindowIsExplained() {
+        let model = AppModel(services: FakeServices(), store: MemoryStore(), defaults: .isolated())
+        XCTAssertEqual(model.loginWindowError(problem: nil) as? AppError, .loginWindowClosed)
+        XCTAssertEqual((model.loginWindowError(problem: "HTTP 429") as? DetailedError)?.error, .loginRateLimited)
+        let failed = model.loginWindowError(problem: "The Internet connection appears to be offline.")
+        XCTAssertEqual((failed as? DetailedError)?.error, .loginPageFailed)
+        XCTAssertTrue(failed.localizedDescription.contains("offline"))
+    }
+
+    /// PS5 seçilmeden ya da adres yazılmadan bağlanılırsa "PS5 bulunamadı" denir.
+    func testMissingConsoleIsExplained() async {
+        let model = AppModel(services: FakeServices(), store: MemoryStore(), defaults: .isolated())
+        model.accountId = Data(repeating: 1, count: 8)
         do {
-            try await model.register(host: "192.168.1.253", pin: "1234")
-            XCTFail("Kısa kod kabul edilmemeli")
+            try await model.register(host: "  ", pin: "12345678")
+            XCTFail("Adressiz kayıt başlamamalı")
+        } catch {
+            XCTAssertEqual(error as? AppError, .missingConsole)
+        }
+    }
+
+    private func registrationError(_ thrown: Error) async -> Error? {
+        let services = FakeServices()
+        services.registerError = thrown
+        let model = AppModel(services: services, store: MemoryStore(), defaults: .isolated())
+        model.accountId = Data(repeating: 1, count: 8)
+        do {
+            try await model.register(host: "192.168.1.253", pin: "12345678")
+            XCTFail("Kayıt başarısız olmalı")
+            return nil
         } catch {
             XCTAssertNil(model.console)
+            return error
         }
     }
 

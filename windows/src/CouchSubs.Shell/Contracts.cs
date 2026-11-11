@@ -320,7 +320,15 @@ public enum StatusTone { Idle, Warning, Good }
 /// <summary><c>BetterTranslation</c>: isteğe bağlı ücretsiz Gemini anahtarı; atlanabilir (Mac'teki betterTranslation).</summary>
 public enum OnboardingStep { Welcome, SecondAccount, PsnLogin, Console, Tv, Translation, Test, BetterTranslation, Done }
 
-public enum AppError { InvalidPin, InvalidLogin, MissingAccount, WrongAccount, RegistrationFailed, ConsoleNoAnswer, ConsoleInUse, ConsoleCrashed, ConsoleVersion }
+public enum AppError
+{
+    InvalidPin, InvalidLogin, MissingAccount, WrongAccount, RegistrationFailed, ConsoleNoAnswer, ConsoleInUse, ConsoleCrashed, ConsoleVersion,
+    /// <summary>PS5 seçilmedi ve IP adresi yazılmadı.</summary>
+    MissingConsole,
+    WrongCode, ConsoleNoReply, BadAddress,
+    /// <summary>PSN girişinin ayrı ayrı anlatılan sonuçları (eskiden hepsi InvalidLogin'di).</summary>
+    LoginRefused, LoginRateLimited, LoginServer, LoginNetwork, LoginBadResponse, LoginWindowClosed, LoginPageFailed,
+}
 
 /// <summary>Kullanıcıya gösterilecek, ne yapması gerektiğini söyleyen hata.</summary>
 public sealed class AppException(AppError error, string message) : Exception(message)
@@ -337,6 +345,17 @@ public sealed class AppException(AppError error, string message) : Exception(mes
         AppError.ConsoleInUse => "Remote Play is in use on another device. Close it there and enter a new code.",
         AppError.ConsoleCrashed => "The PS5 Remote Play service stopped unexpectedly. Restart the PS5 and enter a new code.",
         AppError.ConsoleVersion => "This PS5 system version is not supported yet. Update CouchSubs and try again.",
+        AppError.MissingConsole => "No PS5 found. Make sure it is on and on the same network, or enter its IP address.",
+        AppError.WrongCode => "The code is wrong or has expired. Open Pair Device again on the PS5 and enter the new code.",
+        AppError.ConsoleNoReply => "The PS5 received the request but did not answer in time. Open Pair Device again on the PS5 and enter the new code.",
+        AppError.BadAddress => "No PS5 found at this address. Check the PS5's IP address under Settings › Network › Connection Status.",
+        AppError.LoginRefused => "Sony did not complete the sign-in. Wait a minute, then press Sign in again and sign in with the second account.",
+        AppError.LoginRateLimited => "Sony received too many sign-in attempts. Wait about 15 minutes, then sign in again.",
+        AppError.LoginServer => "Sony's sign-in server returned an error. Wait a few minutes, then sign in again.",
+        AppError.LoginNetwork => "Could not reach Sony's sign-in server. Check the internet connection, then sign in again.",
+        AppError.LoginBadResponse => "Sony's answer could not be read. Sign in again; if it keeps happening, update CouchSubs.",
+        AppError.LoginWindowClosed => "The sign-in window was closed before sign-in finished. Press Sign in and finish signing in in the window.",
+        AppError.LoginPageFailed => "Sony's sign-in page could not be loaded. Check the internet connection, then sign in again.",
         _ => "The PS5 refused the code. Open Pair Device again on the PS5 and enter the new code.",
     }];
 }

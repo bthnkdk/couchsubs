@@ -110,8 +110,22 @@ internal static unsafe partial class NativeMethods
 /// <summary>libchiaki'nin günlük satırları (hata, uyarı, bilgi). Tanı için; kayıt ve oturum sırasında gelir.</summary>
 public static class RemotePlayLog
 {
+    /// <summary>Günlüğün yazıldığı dosya (uygulamadaki RemotePlayDiagnostics yazar).</summary>
+    public static string FilePath =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CouchSubs", "remoteplay.log");
+
+    /// <summary>Kullanıcıya hata iletisinde gösterilen yol (Dosya Gezgini'nin adres çubuğuna yazılabilir).</summary>
+    public const string DisplayPath = @"%LOCALAPPDATA%\CouchSubs\remoteplay.log";
+
     /// <summary>Yerel kütüphanenin iş parçacığında çağrılır; hızlı dönmeli.</summary>
     public static event Action<string>? MessageLogged;
+
+    /// <summary>Uygulamanın kendi satırı (eşleştirme sonucu, arama sonucu).</summary>
+    public static void Note(string message)
+    {
+        try { MessageLogged?.Invoke($"[couchsubs] {message}"); }
+        catch { /* günlük dinleyicisinin hatası çağıranı düşürmemeli */ }
+    }
 
     internal static void Write(int level, string? message)
     {
