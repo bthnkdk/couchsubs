@@ -29,6 +29,17 @@
                                Text="{t:T 'Vestel, Arçelik, Beko, Grundig, Philips and other TVs running Android TV.'}" />
                 </StackPanel>
             </c:Card>
+            <!-- TV'si olmayanlar (PS5 monitörde ya da PS Remote Play bilgisayarda): TV kurulumu atlanır. -->
+            <c:Card Margin="0,16,0,0">
+                <StackPanel>
+                    <Grid>
+                        <TextBlock Text="{t:T 'No TV? Show on the computer screen'}" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        <Button Content="{t:T 'Select'}" HorizontalAlignment="Right" Click="OnNoTv" />
+                    </Grid>
+                    <TextBlock Style="{StaticResource HintText}" Margin="0,8,0,0" TextWrapping="Wrap"
+                               Text="{t:T 'Subtitles appear in a window over the game or PS Remote Play. You can connect a TV later.'}" />
+                </StackPanel>
+            </c:Card>
             <TextBlock x:Name="Waiting" Style="{StaticResource HintText}" Margin="0,16,0,0" Visibility="Collapsed"
                        Text="{t:T 'Accept the request on the TV…'}" />
             <TextBlock Style="{StaticResource HintText}" Margin="0,16,0,0"

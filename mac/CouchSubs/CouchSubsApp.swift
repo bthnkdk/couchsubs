@@ -6,6 +6,8 @@ import SwiftUI
 @main
 struct CouchSubsApp: App {
     @State private var model = Self.makeModel()
+    /// Bilgisayar ekranındaki altyazı penceresi.
+    @State private var overlay = SubtitleOverlayController()
     /// Sparkle: her açılışta ve uygulama açıkken saatte bir GitHub'daki son sürüme bakar; testlerde başlamaz.
     private let updater = SPUStandardUpdaterController(
         startingUpdater: ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
@@ -22,6 +24,7 @@ struct CouchSubsApp: App {
                 .environment(model)
                 // Sparkle kendi takviminde günde bir bakar; yeni sürüm her açılışta fark edilsin diye açılışta da sessizce bakılır.
                 .task {
+                    overlay.attach(model)
                     guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return }
                     updater.updater.checkForUpdatesInBackground()
                 }
@@ -42,6 +45,15 @@ struct CouchSubsApp: App {
                     .keyboardShortcut(",")
                     .disabled(model.step != .done)
             }
+        }
+        // Altyazı bilgisayar ekranındayken menü çubuğundan pencereye ulaşılır ("Tıklamalar geçsin" açıkken geri dönüş yolu).
+        MenuBarExtra("CouchSubs", systemImage: "captions.bubble",
+                     isInserted: Binding(get: { model.step == .done && model.settings.output.showsOnComputer }, set: { _ in })) {
+            Toggle("Clicks pass through", isOn: Binding(get: { model.settings.overlayClickThrough },
+                                                        set: { model.settings.overlayClickThrough = $0 }))
+            Button("Adjust the subtitle window") { model.overlayAdjusting = true }
+            Divider()
+            Button("Open CouchSubs") { NSApp.activate() }
         }
     }
 }

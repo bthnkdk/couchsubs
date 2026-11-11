@@ -158,6 +158,36 @@ final class SubtitleServerTests: XCTestCase {
         XCTAssertTrue(lines.contains("event: subtitle"))
     }
 
+    /// Altyazı yalnız bilgisayar ekranındayken TV'ye altyazı gitmez; OBS katmanı ve dublaj sesi gitmeye devam eder.
+    func testSubtitlesSkipTVsWhenTVOutputIsOff() async throws {
+        let server = SubtitleServer(port: 0)
+        let port = try await server.start()
+        defer { server.stop() }
+        server.sendsToTV = false
+        let (tv, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events")!)
+        let (obs, _) = try await URLSession.shared.bytes(from: URL(string: "http://127.0.0.1:\(port)/events?viewer=obs")!)
+        try await waitUntil { server.connectedClients == 1 }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        server.sendSubtitle("Merhaba", durationMs: 4000)
+        server.stopSpeech()
+        server.clear()
+
+        let obsLines = try await readLines(obs, until: "event: clear")
+        XCTAssertTrue(obsLines.contains("event: subtitle"))
+        let tvLines = try await readLines(tv, until: "event: speech-stop")
+        XCTAssertFalse(tvLines.contains("event: subtitle"))
+    }
+
+    /// Bilgisayar ekranındaki pencere sunucudan geçen altyazıyı alır; sunucu başlamamış olsa da.
+    func testLocalListenerGetsSubtitleAndClear() {
+        let server = SubtitleServer(port: 0)
+        let received = LockedEvents()
+        server.onEvent = { received.append($0) }
+        server.sendSubtitle("Merhaba", durationMs: 4000)
+        server.clear()
+        XCTAssertEqual(received.all, [.subtitle(text: "Merhaba", durationMs: 4000, paragraphs: false), .clear])
+    }
+
     func testHelloIdentifiesTheApp() async throws {
         let server = SubtitleServer(port: 0)
         let port = try await server.start()
@@ -182,4 +212,11 @@ final class SubtitleServerTests: XCTestCase {
         XCTAssertEqual(style, SubtitleStyle(fontSize: 58, bottomPercent: 12, placement: .cover, background: 72, bold: false,
                                              textColor: .white))
     }
+}
+
+private final class LockedEvents: @unchecked Sendable {
+    private let lock = NSLock()
+    private var events: [SubtitleEvent] = []
+    func append(_ event: SubtitleEvent) { lock.withLock { events.append(event) } }
+    var all: [SubtitleEvent] { lock.withLock { events } }
 }

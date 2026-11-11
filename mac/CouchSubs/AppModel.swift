@@ -17,6 +17,8 @@ enum StoreKey {
     /// LG geliştirici modu süresinin son uzatıldığı an.
     static let devSessionRenewed = "devSessionRenewed"
     static let settings = "settings"
+    /// Kurulum sihirbazı bitti. TV'siz kurulumda (altyazı bilgisayar ekranında) ana ekranı bu açar.
+    static let setupComplete = "setupComplete"
     /// Kullanıcının DeepL anahtarı (isteğe bağlı çevrimiçi çeviri).
     static let deepLKey = "deepLKey"
     /// Kullanıcının yapay zekâ anahtarları (isteğe bağlı çevrimiçi çeviri).
@@ -62,6 +64,14 @@ enum TranslationEngine: String, Codable, CaseIterable {
     }
 }
 
+/// Altyazının gösterileceği yer (Windows'taki `SubtitleOutput` ile aynı).
+enum SubtitleOutput: String, Codable, CaseIterable {
+    case tv, computer, both
+
+    var showsOnTV: Bool { self != .computer }
+    var showsOnComputer: Bool { self != .tv }
+}
+
 /// Kalıcı ayarlar (Anahtarlık değil, sıradan tercihler).
 struct UserSettings: Codable, Equatable {
     var region = CropRegion()
@@ -78,6 +88,10 @@ struct UserSettings: Codable, Equatable {
     var geminiModel = AIProvider.gemini.defaultModel.id
     var openAIModel = AIProvider.openAI.defaultModel.id
     var claudeModel = AIProvider.claude.defaultModel.id
+    /// Altyazı TV'de mi, bilgisayar ekranındaki pencerede mi, ikisinde de mi. Eski kayıtlar TV ile açılır.
+    var output = SubtitleOutput.tv
+    /// Bilgisayar ekranındaki altyazı penceresi tıklamaları alttaki pencereye (oyun, PS Remote Play) geçirir.
+    var overlayClickThrough = false
 
     init() {}
 
@@ -96,6 +110,8 @@ struct UserSettings: Codable, Equatable {
         geminiModel = try values.decodeIfPresent(String.self, forKey: .geminiModel) ?? defaults.geminiModel
         openAIModel = try values.decodeIfPresent(String.self, forKey: .openAIModel) ?? defaults.openAIModel
         claudeModel = try values.decodeIfPresent(String.self, forKey: .claudeModel) ?? defaults.claudeModel
+        output = (try? values.decodeIfPresent(SubtitleOutput.self, forKey: .output)) ?? defaults.output
+        overlayClickThrough = try values.decodeIfPresent(Bool.self, forKey: .overlayClickThrough) ?? defaults.overlayClickThrough
     }
 
     /// Listede olmayan kayıtlı modeller (eski ayar ya da listeden çıkarılan model) varsayılana döner.
@@ -440,10 +456,17 @@ final class AppModel {
         case welcome, secondAccount, psnLogin, console, tv, test, betterTranslation, done
     }
 
-    var step: Step
+    var step: Step {
+        didSet {
+            // Sihirbaz bitince ana ekran TV'siz de açılsın.
+            if step == .done, oldValue != .done { store.save(true, for: StoreKey.setupComplete) }
+        }
+    }
     var accountId: Data?
     var console: RegisteredConsole?
     var tv: LGTV?
+    /// TV'nin eşleşme anahtarı kayıtlı.
+    private var tvKeySaved: Bool
     var tvApp = TVAppState.unknown
     /// LG geliştirici modunun kalan süresi (saat); CouchSubs uzattıktan sonra bilinir.
     var devModeHoursLeft: Int?
@@ -456,6 +479,7 @@ final class AppModel {
             // Sıradan tercih; her kaydırıcı hareketinde Anahtarlık'a yazılmasın.
             if let data = try? JSONEncoder().encode(settings) { defaults.set(data, forKey: StoreKey.settings) }
             server.sendStyle(settings.style)
+            if settings.output != oldValue.output { outputChanged() }
             if settings.dubbing != oldValue.dubbing { dubbingSettingsChanged(from: oldValue.dubbing) }
             let translationChanged = settings.onlineTranslation != oldValue.onlineTranslation
                 || settings.onlineEngine != oldValue.onlineEngine || settings.geminiModel != oldValue.geminiModel
@@ -516,6 +540,16 @@ final class AppModel {
     var dubbingError: String?
     var dubbingModelReady = DubbingModelStore.isReady
 
+    // Bilgisayar ekranındaki altyazı penceresi (bkz. AppModel+ComputerScreen.swift)
+    /// Pencerede şu an görünen satırlar (TV'dekiyle aynı yığın).
+    var overlayLines: [SubtitleStack.Line] = []
+    /// Pencerenin yeri ve genişliği ayarlanıyor: örnek yazı görünür, tıklamalar geçmez.
+    var overlayAdjusting = false
+    @ObservationIgnored var overlayStack = SubtitleStack()
+    @ObservationIgnored var overlayTimer: Task<Void, Never>?
+    /// Yığının saati (saniye); testlerde ileri sarılır.
+    @ObservationIgnored var overlayClock: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+
     init(services: AppServices = LiveServices(), store: AppStore = KeychainStore(), defaults: UserDefaults = .standard) {
         self.services = services
         self.store = store
@@ -523,7 +557,10 @@ final class AppModel {
         let accountId = store.load(Data.self, for: StoreKey.accountId)
         let console = store.load(RegisteredConsole.self, for: StoreKey.console)
         let tv = store.load(LGTV.self, for: StoreKey.tv)
-        let ready = accountId != nil && console != nil && tv != nil && store.load(String.self, for: StoreKey.tvKey) != nil
+        let tvKeySaved = store.load(String.self, for: StoreKey.tvKey) != nil
+        let paired = tv != nil && tvKeySaved
+        let ready = accountId != nil && console != nil && (paired || store.load(Bool.self, for: StoreKey.setupComplete) == true)
+        self.tvKeySaved = tvKeySaved
         self.accountId = accountId
         self.console = console
         self.tv = tv
@@ -536,7 +573,16 @@ final class AppModel {
         savedKeys = Set(TranslationEngine.allCases.filter { engine in
             engine.storeKey.flatMap { store.load(String.self, for: $0) }?.isEmpty == false
         })
+        attachServer()
+    }
+
+    /// Sunucunun TV sayısını, altyazı yerini ve bilgisayar ekranına giden olayları bağlar (sunucu yeniden kurulunca da).
+    private func attachServer() {
         server.onClientsChanged = { [weak self] count in self?.tvClients = count }
+        server.sendsToTV = settings.output.showsOnTV
+        server.onEvent = { [weak self] event in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.overlayReceive(event) } }
+        }
     }
 
     // MARK: - Sihirbaz
@@ -546,7 +592,7 @@ final class AppModel {
         case .welcome, .secondAccount, .test, .betterTranslation: true
         case .psnLogin: accountId != nil
         case .console: console != nil
-        case .tv: tv != nil && store.load(String.self, for: StoreKey.tvKey) != nil
+        case .tv: hasTV || settings.output == .computer
         case .done: false
         }
     }
@@ -593,6 +639,15 @@ final class AppModel {
 
     func discoverTVs() async -> [LGTV] { await services.discoverTVs() }
 
+    /// Eşleşmiş bir TV var. Anahtarın varlığı saklanır; ana ekran her çizimde Anahtarlık'a sormasın.
+    var hasTV: Bool { tv != nil && tvKeySaved }
+
+    /// Sihirbazdaki "TV'm yok": TV aranmaz ve kurulmaz, altyazı bilgisayar ekranında gösterilir; sonraki adıma geçilir.
+    func useComputerScreen() {
+        settings.output = .computer
+        advance()
+    }
+
     func pair(_ tv: LGTV) async throws {
         try await startServer()
         let pairing = try await services.pairTV(tv, key: store.load(String.self, for: StoreKey.tvKey), server: serverAddress(for: tv))
@@ -602,7 +657,10 @@ final class AppModel {
         self.tv = tv
         store.save(tv, for: StoreKey.tv)
         store.save(pairing.key, for: StoreKey.tvKey)
+        tvKeySaved = true
         tvAppMissing = !pairing.launched
+        // Daha önce "TV'm yok" seçildiyse TV bağlanınca altyazı TV'ye gider.
+        if settings.output == .computer { settings.output = .tv }
         if tv.brand == .lg {
             await refreshTVApp()
         } else {
@@ -805,10 +863,12 @@ final class AppModel {
     /// Kurulumu baştan başlatır (kayıtlı her şeyi siler).
     func resetSetup() {
         stop()
-        [StoreKey.accountId, StoreKey.console, StoreKey.tv, StoreKey.tvKey, StoreKey.tvDevKey, StoreKey.tvAppVersion].forEach(store.remove)
+        [StoreKey.accountId, StoreKey.console, StoreKey.tv, StoreKey.tvKey, StoreKey.tvDevKey, StoreKey.tvAppVersion,
+         StoreKey.setupComplete].forEach(store.remove)
         accountId = nil
         console = nil
         tv = nil
+        tvKeySaved = false
         tvApp = .unknown
         tvAppMissing = false
         step = .welcome
@@ -818,7 +878,7 @@ final class AppModel {
 
     func start() async {
         // Düğmeye iki kez basılması ya da beklerken tekrar çağrılması ikinci bir oturum açmaz.
-        guard !isRunning, !isStarting, let console, let accountId, let tv else { return }
+        guard !isRunning, !isStarting, canStart, let console, let accountId else { return }
         isStarting = true
         defer { isStarting = false }
 
@@ -835,15 +895,7 @@ final class AppModel {
         session.start()
         self.session = session
 
-        // TV uygulamasını başlat ve açık tut; TV kapalıysa açıldığında bağlanır.
-        let server = self.server
-        let keeper = services.makeKeeper(tv: tv, key: store.load(String.self, for: StoreKey.tvKey), params: ["server": serverAddress(for: tv)],
-                                         appConnected: { server.connectedClients > 0 }) { [weak self] moved in
-            Task { @MainActor in self?.tvMoved(to: moved) }
-        }
-        keeper.start(interval: .seconds(5))
-        self.keeper = keeper
-        Task { await refreshTVApp() }
+        startKeeper()
 
         // Mac uykudan uyanınca bağlantıları hemen yenile.
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -855,14 +907,50 @@ final class AppModel {
         sleepActivity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled],
                                                               reason: "Translating game subtitles")
         isRunning = true
-        if screenHotkey == nil { screenHotkey = ScreenHotkey { [weak self] in self?.translateScreen() } }
+        if screenHotkey == nil { screenHotkey = GlobalHotkey(.translateScreen) { [weak self] in self?.translateScreen() } }
         screenHotkey?.enabled = true
+        updateClickThroughHotkey()
+    }
+
+    /// Çeviri başlatılabilir mi: PS5 kurulu ve altyazının gideceği bir yer var (TV eşleşmiş ya da bilgisayar ekranı seçili).
+    var canStart: Bool {
+        console != nil && accountId != nil && (settings.output.showsOnComputer || hasTV)
+    }
+
+    /// TV uygulamasını başlatır ve açık tutar; TV kapalıysa açıldığında bağlanır. Altyazı TV'ye gitmiyorsa ya da TV
+    /// yoksa bir şey yapmaz.
+    private func startKeeper() {
+        guard keeper == nil, settings.output.showsOnTV, hasTV, let tv else { return }
+        let server = self.server
+        let keeper = services.makeKeeper(tv: tv, key: store.load(String.self, for: StoreKey.tvKey), params: ["server": serverAddress(for: tv)],
+                                         appConnected: { server.connectedClients > 0 }) { [weak self] moved in
+            Task { @MainActor in self?.tvMoved(to: moved) }
+        }
+        keeper.start(interval: .seconds(5))
+        self.keeper = keeper
+        Task { await refreshTVApp() }
+    }
+
+    /// Altyazının yeri değişti: TV seçildiyse TV uygulaması açılır, kaldırıldıysa artık açık tutulmaz.
+    private func outputChanged() {
+        server.sendsToTV = settings.output.showsOnTV
+        if !settings.output.showsOnComputer { overlayHide() }
+        updateClickThroughHotkey()
+        guard isRunning else { return }
+        if settings.output.showsOnTV {
+            startKeeper()
+        } else {
+            keeper?.stop()
+            keeper = nil
+        }
     }
 
     // MARK: - Ekranı çevir
 
     /// ⌥⌘T yalnız çeviri sürerken tutulur.
-    @ObservationIgnored private var screenHotkey: ScreenHotkey?
+    @ObservationIgnored private var screenHotkey: GlobalHotkey?
+    /// ⌥⌘L: altyazı penceresinde "Tıklamalar geçsin"i açar/kapatır; çeviri sürerken ve altyazı bilgisayardayken tutulur.
+    @ObservationIgnored var clickThroughHotkey: GlobalHotkey?
     /// Süren "ekranı çevir" işi; yeniden basılınca iptal edilir.
     @ObservationIgnored private var screenTask: Task<Void, Never>?
     /// TV'deki ekran çevirilerinin kalkacağı an; bu andan önce yeniden basmak onları kaldırır.
@@ -1083,6 +1171,8 @@ final class AppModel {
         isRunning = false
         onlineIssue = nil
         sessionState = .disconnected(.stopped)
+        updateClickThroughHotkey()
+        overlayHide()
     }
 
     private func sessionStateChanged(_ state: SessionState) {
@@ -1162,7 +1252,7 @@ final class AppModel {
         } catch {
             // 8787 başka bir uygulamada; TV'ye zaten adres bildirildiği için herhangi bir boş port olur.
             server = SubtitleServer(port: 0)
-            server.onClientsChanged = { [weak self] count in self?.tvClients = count }
+            attachServer()
             serverPort = try await server.start()
         }
         serverStarted = true

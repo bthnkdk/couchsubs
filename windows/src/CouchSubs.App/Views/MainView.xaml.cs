@@ -23,6 +23,7 @@ public partial class MainView : UserControl
         this.controller = controller;
         DataContext = controller;
         InitializeComponent();
+        OutputCard.Attach(controller);
         controller.PropertyChanged += OnChanged;
         connectionWatch.Tick += async (_, _) => await controller.CheckConnectionsAsync();
         Loaded += (_, _) => connectionWatch.Start();
@@ -39,7 +40,7 @@ public partial class MainView : UserControl
     private void OnChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName is nameof(AppController.IsRunning) or nameof(AppController.TranslatorStatus) or nameof(AppController.ModelInstalled)
-            or nameof(AppController.OnlineIssue))
+            or nameof(AppController.OnlineIssue) or nameof(AppController.CanStart) or nameof(AppController.IsStarting))
             Refresh();
         if (e.PropertyName is nameof(AppController.UpdateVersion) or nameof(AppController.Updating)
             or nameof(AppController.UpdateProgress) or nameof(AppController.UpdateError))
@@ -67,6 +68,8 @@ public partial class MainView : UserControl
         Toggle.Style = (Style)FindResource(running ? "DangerButton" : "PrimaryButton");
         ToggleGlyph.Text = running ? Glyphs.Stop : Glyphs.Play;
         ToggleText.Text = Localizer.Current[running ? "Stop translating" : "Start translating"];
+        // Altyazının gideceği bir yer yoksa (TV seçili ama bağlı değil) çeviri başlatılamaz.
+        Toggle.IsEnabled = !controller.IsStarting && (running || controller.CanStart);
         ModelCard.Visibility = controller.ModelInstalled ? Visibility.Collapsed : Visibility.Visible;
         // Çevrimiçi motor çeviremiyor; satırlar bu arada cihaz üstü modelle geliyor.
         var issue = running ? controller.OnlineIssue : null;
@@ -85,6 +88,9 @@ public partial class MainView : UserControl
     }
 
     private void OnSettings(object sender, RoutedEventArgs e) => SettingsWindow.Open(Window.GetWindow(this), controller);
+
+    /// <summary>TV'siz kurulmuş uygulamada TV'yi sonradan bağlamak için sihirbazın TV adımı açılır.</summary>
+    private void OnConnectTv(object sender, RoutedEventArgs e) => controller.Step = OnboardingStep.Tv;
 
     private void OnDownload(object sender, RoutedEventArgs e) => controller.StartModelDownload();
 

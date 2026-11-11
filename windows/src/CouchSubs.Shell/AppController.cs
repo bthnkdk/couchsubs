@@ -93,9 +93,24 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         settings = loaded.WithCuratedModels();
         // Listede olmayan model varsayılana döndüyse ayar hemen kaydedilir.
         if (settings != loaded) settingsStore.Save(settings);
-        var ready = accountId is not null && console is not null && tv is not null && store.Load<string>(StoreKeys.TvKey) is not null;
+        var paired = tv is not null && store.Load<string>(StoreKeys.TvKey) is not null;
+        var ready = accountId is not null && console is not null && (paired || store.Load<bool>(StoreKeys.SetupComplete));
         step = ready ? OnboardingStep.Done : OnboardingStep.Welcome;
+        AttachServer();
+    }
+
+    /// <summary>Sunucunun TV sayısını, altyazı yerini ve bilgisayar ekranına giden olayları bağlar (sunucu yeniden kurulunca da).</summary>
+    private void AttachServer()
+    {
         server.ClientsChanged += OnClientsChanged;
+        server.EventSent += OnSubtitleEvent;
+        server.SendsToTv = settings.Output.ShowsOnTv();
+    }
+
+    private void DetachServer()
+    {
+        server.ClientsChanged -= OnClientsChanged;
+        server.EventSent -= OnSubtitleEvent;
     }
 
     // --- Durum ---
@@ -106,7 +121,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         set
         {
             // Eşleştirme adımındaki güvenlik duvarı önerisi başka adıma taşınmaz.
-            if (Set(ref step, value, [nameof(CanAdvance), nameof(StepNumber)])) ClearFirewallPrompt();
+            if (!Set(ref step, value, [nameof(CanAdvance), nameof(StepNumber)])) return;
+            ClearFirewallPrompt();
+            // Sihirbaz bitince ana ekran TV'siz de açılsın.
+            if (value == OnboardingStep.Done) store.Save(StoreKeys.SetupComplete, true);
         }
     }
     public static int StepCount => (int)OnboardingStep.Done;
@@ -120,8 +138,17 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public string Ps5StatusText => StatusText(sessionState, isRunning, text);
     public StatusTone Ps5Tone => Ps5ToneFor(sessionState, isRunning);
     public int TvClients { get => tvClients; private set => Set(ref tvClients, value, [nameof(TvTone), nameof(TvStatusText)]); }
-    public StatusTone TvTone => TvToneFor(tvClients, isRunning);
-    public string TvStatusText => tvClients > 0 ? text["Connected"] : text["Waiting for the TV app"];
+    public StatusTone TvTone => HasTv ? TvToneFor(tvClients, isRunning) : StatusTone.Idle;
+    public string TvStatusText => !HasTv ? text["Not set up"] : tvClients > 0 ? text["Connected"] : text["Waiting for the TV app"];
+    /// <summary>Eşleşmiş bir TV var.</summary>
+    public bool HasTv => tv is not null && store.Load<string>(StoreKeys.TvKey) is not null;
+    /// <summary>Ana ekranda TV durumu gösterilir mi (altyazı yalnız bilgisayar ekranındaysa gösterilmez).</summary>
+    public bool ShowsOnTv => settings.Output.ShowsOnTv();
+    public bool ShowsOnComputer => settings.Output.ShowsOnComputer();
+    /// <summary>Altyazı TV'ye de gidecek ama TV eşleşmedi: ana ekranda "TV bağla" düğmesi çıkar.</summary>
+    public bool NeedsTv => ShowsOnTv && !HasTv;
+    /// <summary>Çeviri başlatılabilir mi: PS5 kurulu ve altyazının gideceği bir yer var (TV eşleşmiş ya da bilgisayar ekranı seçili).</summary>
+    public bool CanStart => console is not null && accountId is not null && (ShowsOnComputer || HasTv);
     public string LastSource { get => lastSource; private set => Set(ref lastSource, value); }
     public string LastTranslation { get => lastTranslation; private set => Set(ref lastTranslation, value); }
     public TranslatorStatus TranslatorStatus { get => translatorStatus; private set => Set(ref translatorStatus, value); }
@@ -153,6 +180,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             if (!Set(ref settings, value, [nameof(UsesFreeGemini)])) return;
             settingsStore.Save(value);
             server.SendStyle(value.Style);
+            if (old.Output != value.Output) OutputChanged();
             if (old.Dubbing != value.Dubbing) DubbingSettingsChanged(old.Dubbing);
             var translationChanged = old.OnlineTranslation != value.OnlineTranslation || old.OnlineEngine != value.OnlineEngine
                                      || old.GeminiModel != value.GeminiModel || old.OpenAiModel != value.OpenAiModel
@@ -173,7 +201,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         OnboardingStep.Welcome or OnboardingStep.SecondAccount or OnboardingStep.Test or OnboardingStep.BetterTranslation => true,
         OnboardingStep.PsnLogin => accountId is not null,
         OnboardingStep.Console => console is not null,
-        OnboardingStep.Tv => tv is not null && store.Load<string>(StoreKeys.TvKey) is not null,
+        OnboardingStep.Tv => HasTv || settings.Output == SubtitleOutput.Computer,
         OnboardingStep.Translation => ModelInstalled,
         _ => false,
     };
@@ -252,6 +280,15 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public Task<IReadOnlyList<LgTv>> DiscoverTvsAsync() => services.DiscoverTvsAsync();
 
+    /// <summary>
+    /// Sihirbazdaki "TV'm yok": TV aranmaz ve kurulmaz, altyazı bilgisayar ekranında gösterilir; sonraki adıma geçilir.
+    /// </summary>
+    public void UseComputerScreen()
+    {
+        Settings = settings with { Output = SubtitleOutput.Computer };
+        Advance();
+    }
+
     public async Task PairAsync(LgTv target)
     {
         await StartServerAsync();
@@ -262,7 +299,10 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         store.Save(StoreKeys.Tv, target);
         store.Save(StoreKeys.TvKey, pairing.Key);
         tvAppMissing = !pairing.Launched;
-        Changed(nameof(Tv), nameof(CanAdvance), nameof(CanInstallTvApp));
+        // Daha önce "TV'm yok" seçildiyse TV bağlanınca altyazı TV'ye gider.
+        if (settings.Output == SubtitleOutput.Computer) Settings = settings with { Output = SubtitleOutput.Tv };
+        Changed(nameof(Tv), nameof(CanAdvance), nameof(CanInstallTvApp), nameof(HasTv), nameof(NeedsTv), nameof(CanStart),
+            nameof(TvStatusText), nameof(TvTone));
         if (target.Brand == TvBrand.Lg) await RefreshTvAppAsync();
         // Samsung girişi ya da Android onayı dakikalar sürebilir; eşleşme beklemesin.
         else _ = RefreshTvAppAsync();
@@ -738,14 +778,15 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public void ResetSetup()
     {
         Stop();
-        foreach (var key in new[] { StoreKeys.AccountId, StoreKeys.Console, StoreKeys.Tv, StoreKeys.TvKey, StoreKeys.TvDevKey, StoreKeys.TvAppVersion }) store.Remove(key);
+        foreach (var key in new[] { StoreKeys.AccountId, StoreKeys.Console, StoreKeys.Tv, StoreKeys.TvKey, StoreKeys.TvDevKey, StoreKeys.TvAppVersion,
+                     StoreKeys.SetupComplete }) store.Remove(key);
         accountId = null;
         console = null;
         tv = null;
         tvAppMissing = false;
         TvApp = TvAppState.Unknown;
         Step = OnboardingStep.Welcome;
-        Changed(nameof(HasAccount), nameof(Console), nameof(Tv));
+        Changed(nameof(HasAccount), nameof(Console), nameof(Tv), nameof(HasTv), nameof(NeedsTv), nameof(CanStart));
     }
 
     // --- Çeviri ---
@@ -753,7 +794,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     public async Task StartAsync()
     {
         // Düğmeye iki kez basılması ya da beklerken tekrar çağrılması ikinci bir oturum açmaz.
-        if (isRunning || isStarting || console is null || accountId is null || tv is null) return;
+        if (isRunning || isStarting || !CanStart || console is null || accountId is null) return;
         IsStarting = true;
         try
         {
@@ -771,13 +812,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             stream.Start();
             session = stream;
 
-            // TV uygulamasını başlat ve açık tut; TV kapalıysa açıldığında bağlanır.
-            var running = server;
-            var tvKeeper = services.MakeKeeper(tv, store.Load<string>(StoreKeys.TvKey), new Dictionary<string, string> { ["server"] = ServerAddress(tv) },
-                () => running.ConnectedClients > 0, moved => post(() => TvMoved(moved)));
-            tvKeeper.Start(TimeSpan.FromSeconds(5));
-            keeper = tvKeeper;
-            _ = RefreshTvAppAsync();
+            StartKeeper();
 
             sleep.Begin();
             IsRunning = true;
@@ -787,6 +822,68 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         {
             IsStarting = false;
         }
+    }
+
+    /// <summary>
+    /// TV uygulamasını başlatır ve açık tutar; TV kapalıysa açıldığında bağlanır. Altyazı TV'ye gitmiyorsa ya da TV
+    /// yoksa bir şey yapmaz.
+    /// </summary>
+    private void StartKeeper()
+    {
+        if (keeper is not null || !ShowsOnTv || !HasTv || tv is not { } target) return;
+        var running = server;
+        var tvKeeper = services.MakeKeeper(target, store.Load<string>(StoreKeys.TvKey), new Dictionary<string, string> { ["server"] = ServerAddress(target) },
+            () => running.ConnectedClients > 0, moved => post(() => TvMoved(moved)));
+        tvKeeper.Start(TimeSpan.FromSeconds(5));
+        keeper = tvKeeper;
+        _ = RefreshTvAppAsync();
+    }
+
+    /// <summary>Altyazının yeri değişti: TV seçildiyse TV uygulaması açılır, kaldırıldıysa artık açık tutulmaz.</summary>
+    private void OutputChanged()
+    {
+        server.SendsToTv = ShowsOnTv;
+        if (!ShowsOnComputer)
+        {
+            OverlayAdjusting = false;
+            OverlayHidden?.Invoke();
+        }
+        Changed(nameof(ShowsOnTv), nameof(ShowsOnComputer), nameof(NeedsTv), nameof(CanStart), nameof(CanAdvance));
+        UpdateTroubleClocks();
+        if (!isRunning) return;
+        if (ShowsOnTv) StartKeeper();
+        else
+        {
+            keeper?.Stop();
+            keeper = null;
+        }
+    }
+
+    // --- Bilgisayar ekranındaki altyazı penceresi ---
+
+    /// <summary>
+    /// TV'ye giden altyazı ve temizleme olaylarının aynısı (arayüz iş parçacığında); bilgisayar ekranındaki pencere bunları
+    /// TV uygulamasıyla aynı yığınla (<see cref="SubtitleStack"/>) gösterir. Altyazı bilgisayarda gösterilmiyorsa gelmez.
+    /// </summary>
+    public event Action<SubtitleEvent>? OverlayEvent;
+    /// <summary>Penceredeki her şey hemen kalksın (çeviri durdu ya da altyazı artık bilgisayarda değil).</summary>
+    public event Action? OverlayHidden;
+
+    private bool overlayAdjusting;
+
+    /// <summary>Pencerenin yeri ve genişliği ayarlanıyor: örnek yazı görünür, tıklamalar geçmez.</summary>
+    public bool OverlayAdjusting { get => overlayAdjusting; set => Set(ref overlayAdjusting, value); }
+
+    /// <summary>Num 7 ve ana ekrandaki seçenek: altyazı penceresinde tıklamaların geçmesini açar/kapatır.</summary>
+    public void ToggleClickThrough() => Settings = settings with { OverlayClickThrough = !settings.OverlayClickThrough };
+
+    /// <summary>Taşınan ya da genişletilen pencerenin yeri kaydedilir.</summary>
+    public void SaveOverlayBounds(OverlayBounds bounds) => Settings = settings with { Overlay = bounds };
+
+    private void OnSubtitleEvent(SubtitleEvent e)
+    {
+        if (!ShowsOnComputer) return;
+        post(() => OverlayEvent?.Invoke(e));
     }
 
     public void Stop()
@@ -813,6 +910,7 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         UpdateTroubleClocks();
         firewallRuleSeen = false;
         ClearFirewallPrompt();
+        OverlayHidden?.Invoke();
     }
 
     /// <summary>Bilgisayar uykudan uyanınca bağlantıları hemen yenile.</summary>
@@ -1037,9 +1135,9 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         catch (SocketException)
         {
             // 8787 başka bir uygulamada; TV'ye adres her seferinde bildirildiği için herhangi bir boş port olur.
-            server.ClientsChanged -= OnClientsChanged;
+            DetachServer();
             server = new SubtitleServer(0);
-            server.ClientsChanged += OnClientsChanged;
+            AttachServer();
             ServerPort = await server.StartAsync();
         }
         serverStarted = true;
@@ -1175,7 +1273,8 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         var ps5Trouble = isRunning && sessionState.Phase != SessionPhase.Streaming && sessionState.Reason?.Kind is not
             (DisconnectKind.ConsoleAsleep or DisconnectKind.InUse or DisconnectKind.Refused or DisconnectKind.LoginPasscode);
         ps5TroubleSince = ps5Trouble ? ps5TroubleSince ?? now : null;
-        tvWaitingSince = isRunning && tvClients == 0 ? tvWaitingSince ?? now : null;
+        // Altyazı TV'ye gitmiyorsa ya da TV yoksa TV beklenmez.
+        tvWaitingSince = isRunning && ShowsOnTv && HasTv && tvClients == 0 ? tvWaitingSince ?? now : null;
     }
 
     // --- Uygulama güncellemesi ---

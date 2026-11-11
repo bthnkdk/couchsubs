@@ -25,7 +25,9 @@ struct SettingsView: View {
 
             ScrollView {
                 VStack(spacing: Theme.space("l")) {
-                    Card(title: "On the TV") {
+                    SubtitleOutputCard(detailed: true)
+                    // Görünüm ayarları bilgisayar ekranındaki pencereye de uygulanır.
+                    Card(title: model.settings.output == .tv ? "On the TV" : "Subtitle appearance") {
                         // 1920 piksellik TV ekranında yazı yüksekliği; sürüklerken TV'de örnek altyazı görünür.
                         Slider(value: Binding(get: { Double(model.settings.style.fontSize) },
                                               set: { model.settings.style.fontSize = Int($0.rounded()) }), in: 20...80) {

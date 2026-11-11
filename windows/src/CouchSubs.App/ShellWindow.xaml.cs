@@ -24,7 +24,7 @@ public partial class ShellWindow : Window
         controller.PropertyChanged += OnChanged;
         // Bilgisayar uykudan uyanınca bağlantılar hemen yenilenir.
         SystemEvents.PowerModeChanged += OnPowerModeChanged;
-        // Num 0, 1, 2, 3, 5, 8, 9 kısayolları yalnız çeviri sürerken tutulur.
+        // Num 0, 1, 2, 3, 5, 7, 8, 9 kısayolları yalnız çeviri sürerken tutulur.
         SourceInitialized += (_, _) =>
         {
             hotkeys = new GlobalHotkeys(new WindowInteropHelper(this).Handle, OnHotkey);
@@ -32,9 +32,12 @@ public partial class ShellWindow : Window
         };
         // Bilgisayarda gösterilecek çeviriler küçük, üstte duran bir kutuda çıkar.
         controller.PcResultReady += PcResultWindow.Display;
+        // Bilgisayar ekranındaki altyazı penceresi (altyazı yokken gizli).
+        var overlay = SubtitleOverlayWindow.Attach(controller);
         Closed += (_, _) =>
         {
             controller.PcResultReady -= PcResultWindow.Display;
+            overlay.Detach();
             hotkeys?.Dispose();
             SystemEvents.PowerModeChanged -= OnPowerModeChanged;
             controller.Dispose();
@@ -59,6 +62,7 @@ public partial class ShellWindow : Window
             case HotkeyAction.Snapshot: controller.RequestSnapshot(); break;
             case HotkeyAction.FreeArea: FreeAreaWindow.Open(controller); break;
             case HotkeyAction.Screen: _ = controller.TranslateScreenAsync(); break;
+            case HotkeyAction.ClickThrough: controller.ToggleClickThrough(); break;
         }
     }
 

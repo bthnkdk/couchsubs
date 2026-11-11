@@ -47,10 +47,23 @@ public partial class SettingsWindow : Window
         controller.SnapshotRequested += OnSnapshot;
         Closed += (_, _) => controller.SnapshotRequested -= OnSnapshot;
         Dubbing.Attach(controller);
+        OutputCard.Attach(controller);
+        ShowStyleTitle();
+        controller.PropertyChanged += OnControllerChanged;
+        Closed += (_, _) => controller.PropertyChanged -= OnControllerChanged;
         Engine.SelectedItem = Engine.Items.Cast<ComboBoxItem>().First(item => (string)item.Tag == settings.Engine.ToString());
         ShowEngine();
         loading = false;
     }
+
+    private void OnControllerChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AppController.Settings)) ShowStyleTitle();
+    }
+
+    /// <summary>Altyazı bilgisayar ekranında da gösteriliyorsa görünüm kartı yalnız TV'ye ait değildir.</summary>
+    private void ShowStyleTitle() =>
+        StyleCard.Title = Localizer.Current[controller.Settings.Output == SubtitleOutput.Tv ? "On the TV" : "Subtitle appearance"];
 
     /// <summary>Seçili motor (ayarlarda ücretsiz ise Free).</summary>
     private TranslationEngine SelectedEngine =>

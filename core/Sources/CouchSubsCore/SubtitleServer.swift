@@ -64,6 +64,12 @@ public struct SubtitleStyle: Codable, Equatable, Sendable {
     }
 }
 
+/// Sunucudan geçen ve bilgisayar ekranındaki altyazı penceresinin de gösterdiği olay.
+public enum SubtitleEvent: Equatable, Sendable {
+    case subtitle(text: String, durationMs: Int, paragraphs: Bool)
+    case clear
+}
+
 /// TV uygulamasının bağlandığı yerel Server-Sent Events sunucusu.
 /// `GET /events` akışında `subtitle`, `clear` ve `style` olaylarını yayınlar.
 public final class SubtitleServer: @unchecked Sendable {
@@ -83,6 +89,17 @@ public final class SubtitleServer: @unchecked Sendable {
     private var speechNumber = 0
 
     public var onClientsChanged: ((Int) -> Void)?
+
+    /// Altyazı ve temizleme olayları gönderildiği anda buraya da verilir (çağıranın iş parçacığında). Bilgisayar
+    /// ekranındaki pencere TV'ye gidenin aynısını gösterir; sunucu başlamamış olsa da çalışır.
+    public var onEvent: (@Sendable (SubtitleEvent) -> Void)?
+
+    /// false ise altyazı olayları TV'lere gitmez (altyazı yalnız bilgisayar ekranında); OBS katmanı almaya devam eder.
+    public var sendsToTV: Bool {
+        get { queue.sync { tvEnabled } }
+        set { queue.sync { tvEnabled = newValue } }
+    }
+    private var tvEnabled = true
 
     /// Bağlantı canlı tutma çerçevesi: yorum satırını EventSource görmez; adlı "ping" olayını TV görür ve
     /// bir süre gelmezse yarı açık kalmış bağlantıyı kapatıp yeniden bağlanır (Windows ile aynı).
@@ -163,6 +180,7 @@ public final class SubtitleServer: @unchecked Sendable {
         var json: [String: Any] = ["text": text, "duration": durationMs, "at": at]
         if let box { json["box"] = Self.json(box) }
         broadcast(event: "subtitle", json: json)
+        onEvent?(.subtitle(text: text, durationMs: durationMs, paragraphs: false))
     }
 
     /// Dört basamağa yuvarlanır; Decimal, JSON'da 0.80000000000000004 yerine 0.8 yazılsın diye.
@@ -173,6 +191,7 @@ public final class SubtitleServer: @unchecked Sendable {
 
     public func clear() {
         broadcast(event: "clear", json: [:])
+        onEvent?(.clear)
     }
 
     /// "Ekranı çevir" sonuçları: `screen` olayı her çeviriyi yazının yeri (`box`), tipik satır yüksekliği (`line`,
@@ -316,12 +335,17 @@ public final class SubtitleServer: @unchecked Sendable {
 
     private func broadcast(event: String, json: [String: Any]) {
         let data = Data(Self.frame(event: event, json: json).utf8)
-        queue.async { self.sendToAll(data) }
+        // Dublaj sesi altyazı yerinden bağımsızdır; yalnız altyazı olayları kapatılır.
+        let subtitle = Self.subtitleEvents.contains(event)
+        queue.async { self.sendToAll(data, includingTVs: !subtitle || self.tvEnabled) }
     }
 
-    /// Gönderim hatası alan bağlantı kopmuş sayılır ve listeden çıkarılır.
-    private func sendToAll(_ data: Data) {
-        for (id, connection) in clients {
+    static let subtitleEvents: Set<String> = ["subtitle", "clear", "screen", "screen-clear", "style"]
+
+    /// Gönderim hatası alan bağlantı kopmuş sayılır ve listeden çıkarılır. `includingTVs` false ise yalnız izleyiciler
+    /// (OBS) alır.
+    private func sendToAll(_ data: Data, includingTVs: Bool = true) {
+        for (id, connection) in clients where includingTVs || viewers.contains(id) {
             connection.send(content: data, completion: .contentProcessed { [weak self] error in
                 guard let self, error != nil else { return }
                 connection.cancel()

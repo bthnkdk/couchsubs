@@ -107,6 +107,38 @@ public class SubtitleServerTests
         Assert.Contains("event: subtitle", await ReadLines(reader, "event: clear"));
     }
 
+    /// Altyazı yalnız bilgisayar ekranındayken TV'ye altyazı gitmez; OBS katmanı ve dublaj sesi gitmeye devam eder.
+    [Fact]
+    public async Task SubtitlesSkipTvsWhenTvOutputIsOff()
+    {
+        using var server = new SubtitleServer(0) { SendsToTv = false };
+        var port = await server.StartAsync();
+        using var tv = await Http.GetAsync($"http://127.0.0.1:{port}/events", HttpCompletionOption.ResponseHeadersRead);
+        using var obs = await Http.GetAsync($"http://127.0.0.1:{port}/events?viewer=obs", HttpCompletionOption.ResponseHeadersRead);
+        await WaitUntil(() => server.ConnectedClients == 1);
+        await Task.Delay(200);
+        server.SendSubtitle("Merhaba", 4000);
+        server.Clear();
+        server.StopSpeech();
+
+        using var obsReader = new StreamReader(await obs.Content.ReadAsStreamAsync());
+        Assert.Contains("event: subtitle", await ReadLines(obsReader, "event: clear"));
+        using var tvReader = new StreamReader(await tv.Content.ReadAsStreamAsync());
+        Assert.DoesNotContain("event: subtitle", await ReadLines(tvReader, "event: speech-stop"));
+    }
+
+    /// Bilgisayar ekranındaki pencere sunucudan geçen altyazıyı alır; sunucu başlamamış olsa da.
+    [Fact]
+    public void LocalListenerGetsSubtitleAndClear()
+    {
+        using var server = new SubtitleServer(0);
+        var received = new List<SubtitleEvent>();
+        server.EventSent += received.Add;
+        server.SendSubtitle("Merhaba", 4000, null, true);
+        server.Clear();
+        Assert.Equal([new SubtitleEvent(SubtitleEventKind.Subtitle, "Merhaba", 4000, true), SubtitleEvent.Cleared], received);
+    }
+
     [Fact]
     public async Task TurkishTextIsSentAsUtf8()
     {
