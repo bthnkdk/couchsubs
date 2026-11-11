@@ -67,6 +67,12 @@ public enum RegistrationFailure
     ConsoleCrashed,
     /// <summary>PS5'in sistem sürümü libchiaki'nin bildiği sürümlerden farklı.</summary>
     VersionMismatch,
+    /// <summary>PS5 kodu kabul etmedi (0x80108b09): kod yanlış ya da süresi dolmuş.</summary>
+    WrongCode,
+    /// <summary>PS5 isteği aldı ama yanıtı zamanında gelmedi (libchiaki'nin ya da bizim 30 sn'lik süremiz doldu).</summary>
+    NoReply,
+    /// <summary>Girilen adres çözülemedi (yanlış yazılmış IP).</summary>
+    BadAddress,
 }
 
 /// <param name="reason">PS5'in bildirdiği RP-Application-Reason (ör. 0x80108b09); PS5 yanıt vermediyse null.</param>

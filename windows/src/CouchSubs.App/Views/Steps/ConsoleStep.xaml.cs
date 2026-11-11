@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using CouchSubs.Core;
 using CouchSubs.RemotePlay;
 using CouchSubs.Shell;
@@ -28,7 +31,8 @@ public partial class ConsoleStep : UserControl
 
     private void ShowDone()
     {
-        Done.Text = Controller.Console?.Name ?? "";
+        var name = Controller.Console?.Name;
+        Done.Text = string.IsNullOrEmpty(name) ? "PS5" : name;
         Done.Visibility = Controller.Console is null ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -41,25 +45,34 @@ public partial class ConsoleStep : UserControl
         foreach (var console in found)
         {
             var option = new RadioButton { Content = $"{console.Name} — {console.Host}", IsChecked = console.Host == selected, GroupName = "ps5" };
-            option.Checked += (_, _) => { selected = console.Host; UpdateConnect(); };
+            option.Checked += (_, _) => selected = console.Host;
             Consoles.Children.Add(option);
         }
         var none = found.Count == 0;
         NotFound.Visibility = ManualHost.Visibility = none ? Visibility.Visible : Visibility.Collapsed;
         Search.IsEnabled = true;
-        UpdateConnect();
     }
-
-    private void UpdateConnect() =>
-        Connect.IsEnabled = Host.Length > 0 && Pin.Text.Count(char.IsDigit) == 8;
-
-    private void OnPinChanged(object sender, TextChangedEventArgs e) => UpdateConnect();
 
     private async void OnSearch(object sender, RoutedEventArgs e) => await SearchAsync();
 
+    /// <summary>Kod ya da adres alanında Enter bağlanır. Olay işlendi sayılır; yoksa Enter, adımın kapalı "Devam"
+    /// düğmesine (IsDefault) gidip sessizce hiçbir şey yapmıyordu.</summary>
+    private void OnFieldKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Enter or Key.Return)) return;
+        e.Handled = true;
+        if (!working) OnConnect(sender, e);
+    }
+
+    private bool working;
+
+    /// <summary>Düğme yalnız çalışırken kapalı; eksik kod ya da adres tıklanınca açıkça söylenir, hiçbir sonuç sessiz kalmaz.</summary>
     private async void OnConnect(object sender, RoutedEventArgs e)
     {
+        if (working) return;
+        working = true;
         Connect.IsEnabled = false;
+        Working.Visibility = Visibility.Visible;
         Error.Text = "";
         try
         {
@@ -70,10 +83,34 @@ public partial class ConsoleStep : UserControl
         {
             Error.Text = error.Message;
         }
-        catch (Exception)
+        catch (Exception error)
         {
-            Error.Text = AppException.Describe(AppError.RegistrationFailed, Localizer.Current);
+            RemotePlayLog.Note($"PS5 eşleştirme ekranında beklenmedik hata: {error}");
+            Error.Text = $"{AppException.Describe(AppError.RegistrationFailed, Localizer.Current)} ({error.Message}) "
+                         + Localizer.Current.Format("If this keeps happening, send us this file: %@", RemotePlayLog.DisplayPath);
         }
-        UpdateConnect();
+        finally
+        {
+            working = false;
+            Working.Visibility = Visibility.Collapsed;
+            Connect.IsEnabled = true;
+            ShowLog.Visibility = Error.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void OnShowLog(object sender, RoutedEventArgs e)
+    {
+        var path = RemotePlayLog.FilePath;
+        try
+        {
+            var folder = Path.GetDirectoryName(path)!;
+            Directory.CreateDirectory(folder);
+            var arguments = File.Exists(path) ? $"/select,\"{path}\"" : $"\"{folder}\"";
+            Process.Start(new ProcessStartInfo("explorer.exe", arguments) { UseShellExecute = true });
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.ComponentModel.Win32Exception)
+        {
+            // Dosya Gezgini açılamazsa yol zaten hata iletisinde yazıyor.
+        }
     }
 }

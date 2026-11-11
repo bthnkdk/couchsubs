@@ -230,9 +230,26 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
     /// <summary>Ayarlardaki "Ücretsiz anahtar al": Gemini seçilir, anahtar alanı görünür (anahtar gelene dek ücretsiz çeviri sürer).</summary>
     public void ChooseFreeGemini() => Settings = settings.WithEngine(TranslationEngine.Gemini);
 
+    /// <summary>Giriş penceresinin yönlendirmesinden hesap kimliği. Her başarısızlık kendi iletisiyle
+    /// <see cref="AppException"/> olur ve günlüğe yazılır; genel "Giriş tamamlanmadı" yalnız son çaredir.</summary>
     public async Task CompletePsnLoginAsync(Uri redirect)
     {
-        var id = await services.AccountIdFromRedirectAsync(redirect);
+        byte[] id;
+        try
+        {
+            id = await services.AccountIdFromRedirectAsync(redirect);
+        }
+        catch (PsnAccountException error)
+        {
+            RemotePlayLog.Note($"PSN girişi başarısız: {error.Failure} HTTP {error.StatusCode?.ToString() ?? "-"} {error.Detail}");
+            throw LoginError(error);
+        }
+        catch (Exception error) when (error is not AppException)
+        {
+            RemotePlayLog.Note($"PSN girişi beklenmedik hatayla bitti: {error}");
+            throw new AppException(AppError.InvalidLogin, WithLogHint($"{AppException.Describe(AppError.InvalidLogin, text)} ({error.Message})"));
+        }
+        RemotePlayLog.Note("PSN girişi tamam");
         accountId = id;
         store.Save(StoreKeys.AccountId, id);
         Changed(nameof(HasAccount), nameof(CanAdvance));
@@ -240,10 +257,12 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
 
     public Task<IReadOnlyList<ConsoleInfo>> DiscoverConsolesAsync() => services.DiscoverConsolesAsync();
 
+    /// <summary>PS5'e kayıt olur. Her başarısızlık <see cref="AppException"/> ile anlatılır; sessiz dönüş yok.</summary>
     public async Task RegisterAsync(string host, string pin)
     {
-        var digits = new string([.. pin.Where(char.IsDigit)]);
-        if (digits.Length != 8 || !uint.TryParse(digits, out var value)) throw Error(AppError.InvalidPin);
+        host = host.Trim();
+        if (host.Length == 0) throw Error(AppError.MissingConsole);
+        if (Registration.ParsePin(pin) is not { } value) throw Error(AppError.InvalidPin);
         if (accountId is null) throw Error(AppError.MissingAccount);
         RegisteredConsole registered;
         try
@@ -253,13 +272,16 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
         catch (RegistrationException error)
         {
             // PS5 kendi kodunu bildirdiyse yanıt bize ulaşmıştır, güvenlik duvarı sebep değildir.
-            if (error.Reason is null && error.Failure != RegistrationFailure.WrongAccount) await OfferFirewallAsync();
+            if (error.Reason is null && error.Failure is not (RegistrationFailure.WrongAccount or RegistrationFailure.BadAddress))
+                await OfferFirewallAsync();
             throw RegistrationError(error);
         }
         catch (Exception error) when (error is not AppException)
         {
+            // Beklenmedik hata da (ör. yerel kütüphane yüklenemedi) iletiye dönüşür ve günlüğe yazılır.
+            RemotePlayLog.Note($"PS5 kaydı beklenmedik hatayla bitti ({host}): {error}");
             await OfferFirewallAsync();
-            throw;
+            throw new AppException(AppError.RegistrationFailed, WithLogHint($"{AppException.Describe(AppError.RegistrationFailed, text)} ({error.Message})"));
         }
         ClearFirewallPrompt();
         console = registered;
@@ -277,11 +299,46 @@ public sealed class AppController : INotifyPropertyChanged, IDisposable
             RegistrationFailure.InUse => AppError.ConsoleInUse,
             RegistrationFailure.ConsoleCrashed => AppError.ConsoleCrashed,
             RegistrationFailure.VersionMismatch => AppError.ConsoleVersion,
+            RegistrationFailure.WrongCode => AppError.WrongCode,
+            // İptal yalnız cs_register'ın süresi dolunca olur: PS5 yanıt vermemiştir.
+            RegistrationFailure.NoReply or RegistrationFailure.Canceled => AppError.ConsoleNoReply,
+            RegistrationFailure.BadAddress => AppError.BadAddress,
             _ => AppError.RegistrationFailed,
         };
         var message = AppException.Describe(kind, text);
-        return new AppException(kind, string.IsNullOrEmpty(error.Detail) ? message : $"{message} ({error.Detail})");
+        return new AppException(kind, WithLogHint(string.IsNullOrEmpty(error.Detail) ? message : $"{message} ({error.Detail})"));
     }
+
+    /// <summary>PSN girişinin hatası: Sony'nin bildirdiği hata ya da HTTP kodu iletiye eklenir.</summary>
+    private AppException LoginError(PsnAccountException error)
+    {
+        var kind = error.Failure switch
+        {
+            PsnLoginFailure.Refused => AppError.LoginRefused,
+            PsnLoginFailure.RateLimited => AppError.LoginRateLimited,
+            PsnLoginFailure.Http => AppError.LoginServer,
+            PsnLoginFailure.Network => AppError.LoginNetwork,
+            PsnLoginFailure.BadResponse => AppError.LoginBadResponse,
+            _ => AppError.InvalidLogin,
+        };
+        var message = AppException.Describe(kind, text);
+        var detail = string.Join(", ", new[] { error.StatusCode is { } status ? $"HTTP {status}" : null, error.Detail }.Where(part => !string.IsNullOrEmpty(part)));
+        return new AppException(kind, WithLogHint(detail.Length == 0 ? message : $"{message} ({detail})"));
+    }
+
+    /// <summary>Giriş penceresi yönlendirme olmadan kapandı (kullanıcı kapattı ya da sayfa açılamadı).</summary>
+    /// <param name="problem">Pencerenin gördüğü sorun (ör. "HTTP 429", WebView2 hatası); yoksa null.</param>
+    public AppException LoginWindowError(string? problem)
+    {
+        RemotePlayLog.Note($"PSN giriş penceresi giriş bitmeden kapandı{(problem is null ? "" : $": {problem}")}");
+        if (problem is null) return Error(AppError.LoginWindowClosed);
+        var kind = problem.Contains("429", StringComparison.Ordinal) ? AppError.LoginRateLimited : AppError.LoginPageFailed;
+        return new AppException(kind, WithLogHint($"{AppException.Describe(kind, text)} ({problem})"));
+    }
+
+    /// <summary>Eşleştirme olmazsa kullanıcı remoteplay.log'u gönderebilsin diye yolu iletinin sonuna eklenir.</summary>
+    private string WithLogHint(string message) =>
+        $"{message} {text.Format("If this keeps happening, send us this file: %@", RemotePlayLog.DisplayPath)}";
 
     public Task<IReadOnlyList<LgTv>> DiscoverTvsAsync() => services.DiscoverTvsAsync();
 

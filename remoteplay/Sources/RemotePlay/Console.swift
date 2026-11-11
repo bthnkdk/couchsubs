@@ -98,12 +98,12 @@ public enum Console {
         return collector.hosts.values.sorted { $0.host < $1.host }
     }
 
-    /// Bağlı IPv4 ağlarındaki tüm adresler (en çok /22, yani 1022 adres). Bulunamazsa genel yayın.
+    /// Bağlı IPv4 ağlarındaki tüm adresler (en çok /22, yani 1022 adres), her ağın yayın adresi ve genel yayın.
     static func localSubnetAddresses() -> [in_addr_t] {
         var list: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&list) == 0, let first = list else { return [INADDR_BROADCAST] }
         defer { freeifaddrs(list) }
-        var result: [in_addr_t] = []
+        var networks: [(address: UInt32, netmask: UInt32)] = []
         for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
             let entry = pointer.pointee
             let flags = Int32(entry.ifa_flags)
@@ -111,9 +111,23 @@ public enum Console {
                   entry.ifa_addr?.pointee.sa_family == sa_family_t(AF_INET), let mask = entry.ifa_netmask else { continue }
             let address = UInt32(bigEndian: entry.ifa_addr!.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr })
             let netmask = UInt32(bigEndian: mask.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_addr.s_addr })
-            result += hosts(address: address, netmask: netmask).map { $0.bigEndian }
+            networks.append((address, netmask))
         }
-        return result.isEmpty ? [INADDR_BROADCAST] : result
+        return targets(networks: networks).map { $0.bigEndian }
+    }
+
+    /// Arama hedefleri (ana bilgisayar sıralı). Eskiden genel yayın yalnız hiç adres bulunamazsa ekleniyordu; Wi-Fi
+    /// /22'den büyükken (ör. /16) başka bir arayüz (VPN, sanal makine) adres verince PS5'in ağına hiç sorulmuyordu.
+    /// Artık her ağın kendi yayın adresi ve genel yayın da her zaman eklenir.
+    static func targets(networks: [(address: UInt32, netmask: UInt32)]) -> [UInt32] {
+        var result: [UInt32] = []
+        for network in networks {
+            result += hosts(address: network.address, netmask: network.netmask)
+            if ~network.netmask > 1 { result.append((network.address & network.netmask) | ~network.netmask) }
+        }
+        result.append(UInt32(INADDR_BROADCAST))
+        var seen = Set<UInt32>()
+        return result.filter { seen.insert($0).inserted }
     }
 
     /// Ağdaki diğer adresler (ağ ve yayın adresi hariç); /22'den büyük ağlarda boş.

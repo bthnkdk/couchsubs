@@ -40,14 +40,16 @@ public sealed class LiveServices : IAppServices
     public LinePool? Pool { get; } = new(Path.Combine(AppPaths.Data, "pool.json"),
         AppVersion.Current(System.Reflection.Assembly.GetEntryAssembly() ?? typeof(LiveServices).Assembly));
 
-    public Task<IReadOnlyList<ConsoleInfo>> DiscoverConsolesAsync() => ConsoleDiscovery.DiscoverAsync();
-
-    public async Task<byte[]> AccountIdFromRedirectAsync(Uri redirect)
+    public async Task<IReadOnlyList<ConsoleInfo>> DiscoverConsolesAsync()
     {
-        var code = PsnAccount.CodeFromRedirect(redirect)
-                   ?? throw new AppException(AppError.InvalidLogin, AppException.Describe(AppError.InvalidLogin, Localizer.Current));
-        return await PsnAccount.AccountIdAsync(code);
+        var found = await ConsoleDiscovery.DiscoverAsync();
+        // Eşleştirme olmazsa remoteplay.log'da PS5'in bulunup bulunmadığı da görünsün.
+        RemotePlayLog.Note("PS5 araması: " + (found.Count == 0 ? "bulunamadı"
+            : string.Join(", ", found.Select(c => $"{c.Name} {c.Host}{(c.IsAwake ? "" : " (dinlenmede)")}"))));
+        return found;
     }
+
+    public Task<byte[]> AccountIdFromRedirectAsync(Uri redirect) => PsnAccount.AccountIdFromRedirectAsync(redirect);
 
     public Task<RegisteredConsole> RegisterAsync(string host, byte[] accountId, uint pin) => Registration.RegisterAsync(host, accountId, pin);
 

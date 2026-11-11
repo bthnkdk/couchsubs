@@ -70,13 +70,26 @@ public class FirewallPairingTests
         Assert.Equal(0, firewall.Checks);
     }
 
-    /// PS5'ten yanıt gelmeyince kayıt zaman aşımıyla düşer; o da güvenlik duvarı belirtisidir.
+    /// PS5'ten yanıt gelmeyince kayıt zaman aşımıyla düşer; o da güvenlik duvarı belirtisidir. Hata iletiye dönüşür,
+    /// ayrıntısı kaybolmaz.
     [Fact]
     public async Task NetworkErrorOffersFirewallAndKeepsTheError()
     {
         var (controller, _) = await Pairing(new SocketException());
-        await Assert.ThrowsAsync<SocketException>(() => controller.RegisterAsync("192.168.1.253", "12345678"));
+        var error = await Assert.ThrowsAsync<AppException>(() => controller.RegisterAsync("192.168.1.253", "12345678"));
+        Assert.Equal(AppError.RegistrationFailed, error.Error);
+        Assert.Contains(new SocketException().Message, error.Message);
         Assert.Equal(FirewallPrompt.Offer, controller.FirewallPrompt);
+    }
+
+    /// Yanlış yazılmış adres güvenlik duvarı sorunu değildir.
+    [Fact]
+    public async Task BadAddressOffersNothing()
+    {
+        var (controller, firewall) = await Pairing(new RegistrationException(RegistrationFailure.BadAddress));
+        await Assert.ThrowsAsync<AppException>(() => controller.RegisterAsync("192.168.1.253", "12345678"));
+        Assert.Equal(FirewallPrompt.None, controller.FirewallPrompt);
+        Assert.Equal(0, firewall.Checks);
     }
 
     [Fact]

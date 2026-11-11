@@ -5,7 +5,19 @@
 import Foundation
 
 public enum PSNAccount {
-    public enum PSNError: Error { case badResponse, http(Int) }
+    /// PSN girişinin nerede ve neden bittiği; kullanıcıya ayrı ayrı anlatılır (Windows'taki PsnLoginFailure).
+    public enum PSNError: Error, Equatable {
+        /// Yönlendirmede ne kod ne de Sony'nin hatası var.
+        case noCode
+        /// Sony girişi tamamlamadı (yönlendirmede `error=...` ya da token isteği 400/401/403); ayrıntı Sony'nin hatası.
+        case refused(status: Int?, detail: String?)
+        /// Sony çok fazla deneme dedi (HTTP 429 ya da hata metninde "too many").
+        case rateLimited(status: Int?, detail: String?)
+        case http(Int, detail: String?)
+        /// Sony'ye ulaşılamadı ya da yanıt zamanında gelmedi.
+        case network(String)
+        case badResponse
+    }
 
     static let clientId = "ba495a24-818c-472b-b12d-ff231c1b5745"
     static let clientSecret = "mvaiZkRsAsI1IBkY"
@@ -13,6 +25,16 @@ public enum PSNAccount {
     static let scope = "psn:clientapp referenceDataService:countryConfig.read pushNotification:webSocket.desktop.connect sessionManager:remotePlaySession.system.update"
 
     public static let redirectPrefix = "https://remoteplay.dl.playstation.net/remoteplay/redirect"
+
+    /// Çerezsiz ve önbelleksiz oturum: URLSession.shared Sony'nin çerezlerini uygulamanın kalıcı çerez deposunda tutuyordu;
+    /// bağlantılar sıfırlansa da sonraki girişte eski oturumun çerezleri gönderilmesin.
+    static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieAcceptPolicy = .never
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = 30
+        return URLSession(configuration: configuration)
+    }()
 
     /// Uygulama içi tarayıcıda açılacak Sony giriş sayfası.
     public static let authorizeURL: URL = {
@@ -40,6 +62,62 @@ public enum PSNAccount {
         return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "code" }?.value
     }
 
+    /// Sony girişi tamamlamadıysa yönlendirmedeki hata ("access_denied: ... (4002)"); yoksa nil.
+    public static func error(fromRedirect url: URL) -> String? {
+        guard url.absoluteString.hasPrefix(redirectPrefix),
+              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+              let error = items.first(where: { $0.name == "error" })?.value, !error.isEmpty else { return nil }
+        // Sony açıklamadaki boşlukları "+" ile yazar.
+        let description = items.first { $0.name == "error_description" }?.value?.replacingOccurrences(of: "+", with: " ")
+        let code = items.first { $0.name == "error_code" }?.value
+        return describe(error: error, description: description, code: code)
+    }
+
+    /// Giriş penceresinin yakaladığı yönlendirmeden hesap kimliği. Sony'nin hatası, HTTP hatası, ağ hatası ve anlaşılamayan
+    /// yanıt ayrı ayrı `PSNError` olur.
+    public static func accountId(fromRedirect url: URL) async throws -> Data {
+        if let code = code(fromRedirect: url), !code.isEmpty { return try await accountId(code: code) }
+        guard let error = error(fromRedirect: url) else { throw PSNError.noCode }
+        throw looksRateLimited(error) ? PSNError.rateLimited(status: nil, detail: error) : PSNError.refused(status: nil, detail: error)
+    }
+
+    static func describe(error: String, description: String?, code: String?) -> String {
+        var text = error
+        if let description, !description.isEmpty { text += ": \(description)" }
+        if let code, !code.isEmpty { text += " (\(code))" }
+        return text
+    }
+
+    static func looksRateLimited(_ text: String?) -> Bool {
+        guard let text = text?.lowercased() else { return false }
+        return text.contains("too many") || text.contains("too_many") || text.contains("rate limit")
+    }
+
+    /// Sony'nin JSON hatasından "error: error_description (error_code)".
+    static func sonyError(_ object: [String: Any]) -> String? {
+        func text(_ name: String) -> String? {
+            switch object[name] {
+            case let value as String: value
+            case let value as NSNumber: value.stringValue
+            default: nil
+            }
+        }
+        guard let error = text("error"), !error.isEmpty else { return nil }
+        return describe(error: error, description: text("error_description"), code: text("error_code"))
+    }
+
+    /// Başarısız HTTP yanıtından hata: 429 çok fazla deneme, 400/401/403 Sony kodu kabul etmedi, kalanı sunucu hatası.
+    static func failure(status: Int, body: Data) -> PSNError {
+        let object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
+        var detail = object.flatMap(sonyError)
+        if detail == nil, let text = String(data: body, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            detail = String(text.prefix(200))
+        }
+        if status == 429 || looksRateLimited(detail) { return .rateLimited(status: status, detail: detail) }
+        if [400, 401, 403].contains(status) { return .refused(status: status, detail: detail) }
+        return .http(status, detail: detail)
+    }
+
     /// Kodu token'a, token'ı hesap kimliğine (8 bayt) çevirir. Token saklanmaz.
     public static func accountId(code: String) async throws -> Data {
         var tokenRequest = URLRequest(url: tokenURL)
@@ -55,7 +133,10 @@ public enum PSNAccount {
         ]
         tokenRequest.httpBody = Data((form.percentEncodedQuery ?? "").utf8)
         let token = try await json(for: tokenRequest)
-        guard let accessToken = token["access_token"] as? String else { throw PSNError.badResponse }
+        guard let accessToken = token["access_token"] as? String else {
+            guard let error = sonyError(token) else { throw PSNError.badResponse }
+            throw looksRateLimited(error) ? PSNError.rateLimited(status: nil, detail: error) : PSNError.refused(status: nil, detail: error)
+        }
 
         var infoRequest = URLRequest(url: tokenURL.appendingPathComponent(accessToken))
         infoRequest.setValue(basicAuth, forHTTPHeaderField: "Authorization")
@@ -75,9 +156,17 @@ public enum PSNAccount {
     }
 
     private static func json(for request: URLRequest) async throws -> [String: Any] {
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) { throw PSNError.http(http.statusCode) }
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw PSNError.badResponse }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch let error as URLError {
+            throw PSNError.network(error.localizedDescription)
+        }
+        if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+            throw failure(status: http.statusCode, body: data)
+        }
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { throw PSNError.badResponse }
         return object
     }
 }

@@ -5488,6 +5488,246 @@
           }
         }
       }
+    },
+    "No PS5 found. Make sure it is on and on the same network, or enter its IP address. CouchSubs must also be allowed in System Settings › Privacy & Security › Local Network.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No PS5 found. Make sure it is on and on the same network, or enter its IP address. CouchSubs must also be allowed in System Settings › Privacy & Security › Local Network."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PS5 bulunamadı. Açık ve aynı ağda olduğundan emin olun ya da IP adresini girin. CouchSubs'ın Sistem Ayarları › Gizlilik ve Güvenlik › Yerel Ağ'da da açık olması gerekir."
+          }
+        }
+      }
+    },
+    "Connecting to the PS5… This can take up to 30 seconds.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connecting to the PS5… This can take up to 30 seconds."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PS5'e bağlanılıyor… Bu 30 saniye kadar sürebilir."
+          }
+        }
+      }
+    },
+    "The code is wrong or has expired. Open Pair Device again on the PS5 and enter the new code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The code is wrong or has expired. Open Pair Device again on the PS5 and enter the new code."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kod yanlış ya da süresi dolmuş. PS5'te Cihazı Eşleştir'i yeniden açın ve yeni kodu girin."
+          }
+        }
+      }
+    },
+    "The PS5 received the request but did not answer in time. Open Pair Device again on the PS5 and enter the new code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The PS5 received the request but did not answer in time. Open Pair Device again on the PS5 and enter the new code."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "PS5 isteği aldı ama zamanında yanıt vermedi. PS5'te Cihazı Eşleştir'i yeniden açın ve yeni kodu girin."
+          }
+        }
+      }
+    },
+    "No PS5 found at this address. Check the PS5's IP address under Settings › Network › Connection Status.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No PS5 found at this address. Check the PS5's IP address under Settings › Network › Connection Status."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bu adreste PS5 bulunamadı. PS5'in IP adresini Ayarlar › Ağ › Bağlantı Durumu'ndan kontrol edin."
+          }
+        }
+      }
+    },
+    "macOS blocked the connection to the local network. Turn on CouchSubs in System Settings › Privacy & Security › Local Network, then enter a new code.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS blocked the connection to the local network. Turn on CouchSubs in System Settings › Privacy & Security › Local Network, then enter a new code."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "macOS yerel ağ bağlantısını engelledi. Sistem Ayarları › Gizlilik ve Güvenlik › Yerel Ağ'da CouchSubs'ı açın, sonra yeni kodu girin."
+          }
+        }
+      }
+    },
+    "If this keeps happening, send us this file: %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "If this keeps happening, send us this file: %@"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorun sürerse şu dosyayı bize gönderin: %@"
+          }
+        }
+      }
+    },
+    "Show log file": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Show log file"
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Günlük dosyasını göster"
+          }
+        }
+      }
+    },
+    "Sony did not complete the sign-in. Wait a minute, then press Sign in again and sign in with the second account.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony did not complete the sign-in. Wait a minute, then press Sign in again and sign in with the second account."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony girişi tamamlamadı. Bir dakika bekleyin, sonra Giriş yap'a yeniden basıp ikinci hesapla giriş yapın."
+          }
+        }
+      }
+    },
+    "Sony received too many sign-in attempts. Wait about 15 minutes, then sign in again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony received too many sign-in attempts. Wait about 15 minutes, then sign in again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony çok fazla giriş denemesi aldı. Yaklaşık 15 dakika bekleyip yeniden giriş yapın."
+          }
+        }
+      }
+    },
+    "Sony's sign-in server returned an error. Wait a few minutes, then sign in again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony's sign-in server returned an error. Wait a few minutes, then sign in again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony'nin giriş sunucusu hata verdi. Birkaç dakika bekleyip yeniden giriş yapın."
+          }
+        }
+      }
+    },
+    "Could not reach Sony's sign-in server. Check the internet connection, then sign in again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not reach Sony's sign-in server. Check the internet connection, then sign in again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony'nin giriş sunucusuna ulaşılamadı. İnternet bağlantısını kontrol edip yeniden giriş yapın."
+          }
+        }
+      }
+    },
+    "Sony's answer could not be read. Sign in again; if it keeps happening, update CouchSubs.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony's answer could not be read. Sign in again; if it keeps happening, update CouchSubs."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony'nin yanıtı okunamadı. Yeniden giriş yapın; sürerse CouchSubs'ı güncelleyin."
+          }
+        }
+      }
+    },
+    "The sign-in window was closed before sign-in finished. Press Sign in and finish signing in in the window.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sign-in window was closed before sign-in finished. Press Sign in and finish signing in in the window."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Giriş penceresi giriş bitmeden kapandı. Giriş yap'a basıp girişi pencerede tamamlayın."
+          }
+        }
+      }
+    },
+    "Sony's sign-in page could not be loaded. Check the internet connection, then sign in again.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony's sign-in page could not be loaded. Check the internet connection, then sign in again."
+          }
+        },
+        "tr": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sony'nin giriş sayfası açılamadı. İnternet bağlantısını kontrol edip yeniden giriş yapın."
+          }
+        }
+      }
     }
   },
   "version": "1.0"

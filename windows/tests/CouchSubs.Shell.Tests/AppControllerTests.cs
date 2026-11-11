@@ -132,9 +132,13 @@ internal sealed class FakeServices : IAppServices
     }
 
     public Task<IReadOnlyList<ConsoleInfo>> DiscoverConsolesAsync() => Task.FromResult<IReadOnlyList<ConsoleInfo>>(Consoles);
-    public Task<byte[]> AccountIdFromRedirectAsync(Uri redirect) => Task.FromResult(Enumerable.Repeat((byte)1, 8).ToArray());
+    public Exception? LoginError { get; set; }
+    public Task<byte[]> AccountIdFromRedirectAsync(Uri redirect) =>
+        LoginError is not null ? Task.FromException<byte[]>(LoginError) : Task.FromResult(Enumerable.Repeat((byte)1, 8).ToArray());
+    public uint? RegisteredPin { get; private set; }
     public Task<RegisteredConsole> RegisterAsync(string host, byte[] accountId, uint pin)
     {
+        RegisteredPin = pin;
         if (RegisterError is not null) throw RegisterError;
         Registered = new RegisteredConsole(host, "PS5-789", Enumerable.Repeat((byte)0x31, 16).ToArray(), Enumerable.Repeat((byte)2, 16).ToArray());
         return Task.FromResult(Registered);
@@ -294,6 +298,10 @@ public class AppControllerTests
     [InlineData(RegistrationFailure.InUse, AppError.ConsoleInUse)]
     [InlineData(RegistrationFailure.ConsoleCrashed, AppError.ConsoleCrashed)]
     [InlineData(RegistrationFailure.VersionMismatch, AppError.ConsoleVersion)]
+    [InlineData(RegistrationFailure.WrongCode, AppError.WrongCode)]
+    [InlineData(RegistrationFailure.NoReply, AppError.ConsoleNoReply)]
+    [InlineData(RegistrationFailure.Canceled, AppError.ConsoleNoReply)]
+    [InlineData(RegistrationFailure.BadAddress, AppError.BadAddress)]
     public async Task RegistrationFailureMapsToItsOwnMessage(RegistrationFailure failure, AppError expected)
     {
         var services = new FakeServices { RegisterError = new RegistrationException(failure) };
@@ -301,26 +309,104 @@ public class AppControllerTests
         await controller.CompletePsnLoginAsync(new Uri("https://x/?code=x"));
         var error = await Assert.ThrowsAsync<AppException>(() => controller.RegisterAsync("192.168.1.253", "12345678"));
         Assert.Equal(expected, error.Error);
+        // Genel "kodu kabul etmedi" iletisine düşmez.
+        Assert.DoesNotContain(AppException.Describe(AppError.RegistrationFailed, Localizer.ForLanguage("en")), error.Message);
+        Assert.Null(controller.Console);
     }
 
+    /// İletide PS5'in kodu ve gönderilecek günlük dosyası yazar.
     [Fact]
-    public async Task RegistrationErrorShowsThePs5Code()
+    public async Task RegistrationErrorShowsThePs5CodeAndLogFile()
     {
-        var services = new FakeServices { RegisterError = new RegistrationException(RegistrationFailure.Failed, 0x80108b09, "0x80108b09 (Regist Failed)") };
+        var services = new FakeServices { RegisterError = new RegistrationException(RegistrationFailure.WrongCode, 0x80108b09, "0x80108b09 (Regist failed, probably invalid PIN)") };
         var controller = Make(services);
         await controller.CompletePsnLoginAsync(new Uri("https://x/?code=x"));
         var error = await Assert.ThrowsAsync<AppException>(() => controller.RegisterAsync("192.168.1.253", "12345678"));
-        Assert.Contains("0x80108b09 (Regist Failed)", error.Message);
+        Assert.Contains("0x80108b09 (Regist failed, probably invalid PIN)", error.Message);
+        Assert.Contains(RemotePlayLog.DisplayPath, error.Message);
+    }
+
+    [Theory]
+    [InlineData("1234")]
+    [InlineData("")]
+    [InlineData("123456789")]
+    [InlineData("1234567O")]
+    public async Task PinMustBeEightDigits(string pin)
+    {
+        var services = new FakeServices();
+        var controller = Make(services);
+        await controller.CompletePsnLoginAsync(new Uri("https://x/?code=x"));
+        var error = await Assert.ThrowsAsync<AppException>(() => controller.RegisterAsync("192.168.1.253", pin));
+        Assert.Equal(AppError.InvalidPin, error.Error);
+        Assert.Null(controller.Console);
+        Assert.Null(services.Registered);
+    }
+
+    /// PS5'in ekranındaki gibi boşluklu ya da tireli yazılan kod da kabul edilir.
+    [Fact]
+    public async Task PinWithSpacesIsAccepted()
+    {
+        var services = new FakeServices();
+        var controller = Make(services);
+        await controller.CompletePsnLoginAsync(new Uri("https://x/?code=x"));
+        await controller.RegisterAsync(" 192.168.1.253 ", "1234 5678");
+        Assert.Equal("192.168.1.253", services.Registered?.Host);
+        Assert.Equal(12345678u, services.RegisteredPin);
+    }
+
+    /// PSN girişinin her hatası kendi iletisini alır (eskiden hepsi "Giriş tamamlanmadı" idi); Sony'nin hatası ve HTTP
+    /// kodu iletide yazar, hesap kaydedilmez.
+    [Theory]
+    [InlineData(PsnLoginFailure.Refused, 400, AppError.LoginRefused)]
+    [InlineData(PsnLoginFailure.RateLimited, 429, AppError.LoginRateLimited)]
+    [InlineData(PsnLoginFailure.Http, 503, AppError.LoginServer)]
+    [InlineData(PsnLoginFailure.Network, null, AppError.LoginNetwork)]
+    [InlineData(PsnLoginFailure.BadResponse, null, AppError.LoginBadResponse)]
+    [InlineData(PsnLoginFailure.NoCode, null, AppError.InvalidLogin)]
+    public async Task LoginFailureMapsToItsOwnMessage(PsnLoginFailure failure, int? status, AppError expected)
+    {
+        var services = new FakeServices { LoginError = new PsnAccountException(failure, status, "invalid_grant: Invalid authorization code") };
+        var controller = Make(services);
+        var error = await Assert.ThrowsAsync<AppException>(() => controller.CompletePsnLoginAsync(new Uri("https://x/?code=x")));
+        Assert.Equal(expected, error.Error);
+        Assert.Contains("invalid_grant", error.Message);
+        if (status is { } code) Assert.Contains($"HTTP {code}", error.Message);
+        Assert.Contains(RemotePlayLog.DisplayPath, error.Message);
+        Assert.False(controller.HasAccount);
     }
 
     [Fact]
-    public async Task PinMustBeEightDigits()
+    public async Task UnexpectedLoginErrorKeepsItsDetail()
+    {
+        var services = new FakeServices { LoginError = new InvalidOperationException("boom") };
+        var controller = Make(services);
+        var error = await Assert.ThrowsAsync<AppException>(() => controller.CompletePsnLoginAsync(new Uri("https://x/?code=x")));
+        Assert.Equal(AppError.InvalidLogin, error.Error);
+        Assert.Contains("boom", error.Message);
+    }
+
+    /// Giriş penceresi yönlendirmesiz kapanırsa sessiz kalınmaz; sayfanın sorunu varsa o söylenir.
+    [Fact]
+    public void ClosedLoginWindowIsExplained()
     {
         var controller = Make();
+        Assert.Equal(AppError.LoginWindowClosed, controller.LoginWindowError(null).Error);
+        var failed = controller.LoginWindowError("ConnectionAborted");
+        Assert.Equal(AppError.LoginPageFailed, failed.Error);
+        Assert.Contains("ConnectionAborted", failed.Message);
+        Assert.Equal(AppError.LoginRateLimited, controller.LoginWindowError("HTTP 429").Error);
+    }
+
+    /// PS5 seçilmeden ya da adres yazılmadan bağlanılırsa "PS5 bulunamadı" denir.
+    [Fact]
+    public async Task MissingConsoleIsExplained()
+    {
+        var services = new FakeServices();
+        var controller = Make(services);
         await controller.CompletePsnLoginAsync(new Uri("https://x/?code=x"));
-        var error = await Assert.ThrowsAsync<AppException>(() => controller.RegisterAsync("192.168.1.253", "1234"));
-        Assert.Equal(AppError.InvalidPin, error.Error);
-        Assert.Null(controller.Console);
+        var error = await Assert.ThrowsAsync<AppException>(() => controller.RegisterAsync("  ", "12345678"));
+        Assert.Equal(AppError.MissingConsole, error.Error);
+        Assert.Null(services.Registered);
     }
 
     [Fact]

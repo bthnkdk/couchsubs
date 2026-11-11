@@ -61,6 +61,9 @@ final class ComputerScreenTests: XCTestCase {
         XCTAssertEqual(model.step, .welcome)
         model.step = .tv
         model.useComputerScreen()
+        // Deneme ve isteğe bağlı "Daha iyi çeviri" adımları (Windows'taki testle aynı).
+        model.advance()
+        XCTAssertEqual(model.step, .betterTranslation)
         model.advance()
         XCTAssertEqual(model.step, .done)
         XCTAssertEqual(AppModel(services: FakeServices(), store: store, defaults: defaults).step, .done)
