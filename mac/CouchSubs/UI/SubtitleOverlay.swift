@@ -261,17 +261,26 @@ struct SubtitleOverlayView: View {
         case .previous: 0.6
         case .older: 0.45
         }
-        return Text(verbatim: line.text)
-            .font(.system(size: size, weight: style.bold ? .bold : .semibold))
+        // Derleyici uzun zincirde tür çıkarımında takılmasın diye değerler önce hesaplanır (CI'daki Xcode).
+        let weight: Font.Weight = style.bold ? .bold : .semibold
+        let alignment: TextAlignment = line.paragraphs ? .leading : .center
+        let shadowRadius: CGFloat = 2 * scale
+        let vertical: CGFloat = (current ? 10 : 6) * scale
+        let horizontal: CGFloat = (current ? 26 : 20) * scale
+        let corner: CGFloat = 10 * scale
+        let shown: Double = line.fading ? 0 : opacity
+        let text = Text(verbatim: line.text)
+            .font(.system(size: size, weight: weight))
             .foregroundStyle(Self.color(style.textColor))
-            .multilineTextAlignment(line.paragraphs ? .leading : .center)
+        return text
+            .multilineTextAlignment(alignment)
             .lineSpacing(size * 0.3)
-            .shadow(color: .black, radius: 2 * scale, x: 0, y: 2 * scale)
+            .shadow(color: .black, radius: shadowRadius, x: 0, y: shadowRadius)
             .fixedSize(horizontal: false, vertical: true)
-            .padding(.vertical, (current ? 10 : 6) * scale)
-            .padding(.horizontal, (current ? 26 : 20) * scale)
-            .background(Color.black.opacity(alpha), in: RoundedRectangle(cornerRadius: 10 * scale))
-            .opacity(line.fading ? 0 : opacity)
+            .padding(.vertical, vertical)
+            .padding(.horizontal, horizontal)
+            .background(Color.black.opacity(alpha), in: RoundedRectangle(cornerRadius: corner))
+            .opacity(shown)
             .animation(.linear(duration: SubtitleStack.previousFade), value: line.fading)
             .contentShape(Rectangle())
             .gesture(moveGesture)
