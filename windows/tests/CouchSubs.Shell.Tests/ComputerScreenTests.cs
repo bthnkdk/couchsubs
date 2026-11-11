@@ -71,8 +71,9 @@ public class ComputerScreenTests
         Assert.Equal(OnboardingStep.Welcome, controller.Step);
         controller.Step = OnboardingStep.Tv;
         controller.UseComputerScreen();
-        controller.Advance();
-        controller.Advance();
+        controller.Advance(); // çeviri modeli -> deneme
+        controller.Advance(); // deneme -> daha iyi çeviri (isteğe bağlı)
+        controller.Advance(); // daha iyi çeviri -> bitti
         Assert.Equal(OnboardingStep.Done, controller.Step);
         Assert.Equal(OnboardingStep.Done, Make(store: store, settings: settings).Step);
     }
