@@ -231,7 +231,9 @@ public sealed class SubtitlePipeline(ITextReader reader, ITextTranslator transla
             }
             var box = reading.Box?.PlacedIn(area).CenteredOnScreen();
             // Satır henüz doğrulanmadı: çevirisi şimdiden başlasın, doğrulanınca beklemeden gösterilsin.
-            if (action.Kind == StabilizerKind.None && translator.Prefetches && reading.Text.Trim() is { Length: >= 6 } early && early != lastPrefetched)
+            // Bozuk görünen okuma önceden çevrilmez: büyük olasılıkla gösterilmeyecek, çevrimiçi motorda kota harcar.
+            if (action.Kind == StabilizerKind.None && translator.Prefetches && reading.Text.Trim() is { Length: >= 6 } early
+                && early != lastPrefetched && !LooksMisread(early))
             {
                 lastPrefetched = early;
                 translator.Prefetch(early);

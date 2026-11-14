@@ -29,6 +29,8 @@ public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
     private static readonly TimeSpan RetryAfter = TimeSpan.FromMinutes(1);
 
     private static readonly Lazy<HttpClient> SharedClient = new(() => new HttpClient { Timeout = TimeSpan.FromSeconds(4) });
+    /// <summary>Aynı anda en çok bu kadar önceden çeviri; gürültülü okumalar istek yağmuruna dönmesin.</summary>
+    internal const int MaxPending = 3;
 
     private readonly string _key;
     private readonly ITextTranslator? _fallback;
@@ -40,6 +42,8 @@ public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
     /// <summary>Çevrilmeyecek adlar ve terimler (ücretsiz çeviriyle aynı sözlük); DeepL'e etiketle korunarak gider.</summary>
     private readonly GlossaryStore _glossary;
     private DateTimeOffset _pausedUntil = DateTimeOffset.MinValue;
+    /// <summary>Önceden başlatılan çeviriler (metne göre); sonuç null ise DeepL'e ulaşılamadı. Bitince çıkarılır.</summary>
+    private readonly ConcurrentDictionary<string, Task<string?>> _pending = new(StringComparer.Ordinal);
 
     /// <param name="cache">Kalıcı önbellek; verilmezse yalnız bellekte tutulur.</param>
     /// <param name="glossary">Verilmezse kullanıcının sözlük klasörü (ücretsiz çeviriyle aynı).</param>
@@ -69,15 +73,55 @@ public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
     internal static Uri BaseUri(string key) =>
         new(key.Trim().EndsWith(":fx", StringComparison.Ordinal) ? "https://api-free.deepl.com/v2/" : "https://api.deepl.com/v2/");
 
+    /// <summary>
+    /// Okuma hattı satırı doğrulamadan (ikinci kare, yarım satır beklemesi) çeviriyi başlatır; DeepL'in yanıt süresi
+    /// bekleme süresinin içinde kalır. Kota: önceden çevrilip gösterilmeyen okumalar da harcar; bu yüzden hat yalnız
+    /// temiz okumaları gönderir, aynı anda en çok <see cref="MaxPending"/> istek olur.
+    /// </summary>
+    public bool Prefetches => true;
+
+    public void Prefetch(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text) || _pending.ContainsKey(text) || _pending.Count >= MaxPending
+            || DateTimeOffset.UtcNow < _pausedUntil || _cache.TryGet(DeepLMarkup.CacheKey(text, _glossary.Current), out _))
+            return;
+        // Bağlam önceden çeviri anındaki gösterilmiş satırlardır; önceden çevrilen okuma bağlama eklenmez (gösterilmedi).
+        var context = Context();
+        var task = Task.Run(async () =>
+        {
+            // Önceden çeviri, onu tetikleyen satırın günlük ölçümüne karışmasın.
+            TranslationProbe.Current = null;
+            try { return await TranslateCoreAsync(text, context, fallback: false, CancellationToken.None).ConfigureAwait(false); }
+            catch { return null; }
+        });
+        _pending[text] = task;
+        // Bitince sözlükten çıkar: sonuç önbellektedir. TranslateAsync önce bekleyenlere, sonra önbelleğe bakar.
+        task.ContinueWith(_ => _pending.TryRemove(text, out _), TaskScheduler.Default);
+    }
+
     public async Task<string> TranslateAsync(string text, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(text);
         // Bağlam, bu satırdan önce gösterilenlerdir; satırın kendisi bağlama girmez.
         var context = Context();
         Shown(text);
+        // Önceden başlatıldıysa onu bekle (çağıranın iptali önceden çeviriyi durdurmaz); başarısızsa her zamanki yol.
+        if (_pending.TryGetValue(text, out var early)
+            && await early.WaitAsync(cancellationToken).ConfigureAwait(false) is { } ready)
+            return ready;
+        return (await TranslateCoreAsync(text, context, fallback: true, cancellationToken).ConfigureAwait(false))!;
+    }
+
+    /// <summary>
+    /// Satırı çevirir. <paramref name="fallback"/> kapalıysa (önceden çeviri) DeepL'e ulaşılamayınca yerel modele
+    /// gidilmez, null döner: kullanılmayabilecek okuma için yerel model çalıştırılmaz.
+    /// </summary>
+    private async Task<string?> TranslateCoreAsync(string text, string? context, bool fallback, CancellationToken cancellationToken)
+    {
         var glossary = _glossary.Current;
         if (_cache.TryGet(DeepLMarkup.CacheKey(text, glossary), out var cached)) return cached;
-        if (DateTimeOffset.UtcNow < _pausedUntil) return await FallbackAsync(text, cancellationToken).ConfigureAwait(false);
+        if (DateTimeOffset.UtcNow < _pausedUntil)
+            return fallback ? await FallbackAsync(text, cancellationToken).ConfigureAwait(false) : null;
 
         var pieces = SubtitleSegmenter.Split(text);
         foreach (var name in pieces.Select(SubtitleSegmenter.LabelName).OfType<string>())
@@ -106,7 +150,7 @@ public sealed class DeepLTranslator : ITextTranslator, IOnlineTranslator
         {
             Report(error is DeepLException deepL ? deepL.State : OnlineKeyState.Unreachable);
             _pausedUntil = DateTimeOffset.UtcNow + RetryAfter;
-            return await FallbackAsync(text, cancellationToken).ConfigureAwait(false);
+            return fallback ? await FallbackAsync(text, cancellationToken).ConfigureAwait(false) : null;
         }
         for (var i = 0; i < missing.Count; i++)
         {

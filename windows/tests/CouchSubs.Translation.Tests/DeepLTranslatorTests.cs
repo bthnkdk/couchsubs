@@ -198,6 +198,62 @@ public class DeepLTranslatorTests
         Assert.Equal(["Run!", "Hide!"], local.Calls);
     }
 
+    /// <summary>Satır doğrulanınca önceden başlatılan çeviri beklenir; DeepL'e ikinci istek gitmez.</summary>
+    [Fact]
+    public async Task PrefetchedLineIsNotRequestedAgain()
+    {
+        var deepL = new FakeDeepL(Echo);
+        var translator = new DeepLTranslator("abc:fx", new FakeLocal(), new HttpClient(deepL));
+
+        Assert.True(translator.Prefetches);
+        translator.Prefetch("Get Franklin close to the car");
+        Assert.Equal("[tr] Get Franklin close to the car", await translator.TranslateAsync("Get Franklin close to the car"));
+        Assert.Single(deepL.Requests);
+    }
+
+    /// <summary>Önceden çevrilip gösterilmeyen okuma sonraki satırın bağlamına girmez.</summary>
+    [Fact]
+    public async Task UnusedPrefetchIsNotContext()
+    {
+        var deepL = new FakeDeepL(Echo);
+        var translator = new DeepLTranslator("abc:fx", new FakeLocal(), new HttpClient(deepL));
+
+        translator.Prefetch("Half read lin");
+        await WaitForRequests(deepL, 1);
+        await translator.TranslateAsync("We better get to Sandman quick.");
+
+        Assert.Equal(2, deepL.Requests.Count);
+        Assert.Null(ContextOf(deepL.Requests[1].Body));
+    }
+
+    /// <summary>
+    /// Önceden çeviri DeepL'e ulaşamazsa yerel modeli çalıştırmaz (okuma kullanılmayabilir); satır doğrulanınca
+    /// her zamanki gibi yerel modele düşer.
+    /// </summary>
+    [Fact]
+    public async Task FailedPrefetchFallsBackOnlyWhenLineIsShown()
+    {
+        var deepL = new FakeDeepL((_, _) => new HttpResponseMessage(HttpStatusCode.InternalServerError));
+        var local = new FakeLocal();
+        var translator = new DeepLTranslator("abc:fx", local, new HttpClient(deepL));
+
+        translator.Prefetch("Unused read here");
+        await WaitForRequests(deepL, 1);
+        await Task.Delay(50);
+        Assert.Empty(local.Calls);
+
+        translator.Prefetch("Go to the yacht");
+        Assert.Equal("yerel: Go to the yacht", await translator.TranslateAsync("Go to the yacht"));
+        Assert.Single(deepL.Requests);
+        Assert.Equal(["Go to the yacht"], local.Calls);
+    }
+
+    private static async Task WaitForRequests(FakeDeepL deepL, int count)
+    {
+        for (var i = 0; i < 200 && deepL.Requests.Count < count; i++) await Task.Delay(10);
+        Assert.True(deepL.Requests.Count >= count, $"DeepL'e {count} istek bekleniyordu, gelen: {deepL.Requests.Count}");
+    }
+
     [Fact]
     public async Task KeyCheckReportsUsageAndRejectedKeys()
     {
